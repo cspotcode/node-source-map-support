@@ -193,11 +193,18 @@ function mapSourcePosition(position) {
     // Call the (overrideable) retrieveSourceMap function to get the source map.
     var urlAndMap = retrieveSourceMap(position.source);
     if (urlAndMap) {
-      const mapJson = JSON.parse(urlAndMap.map);
+      let mapJson;
+      if(typeof urlAndMap.map === 'string') {
+        try {
+          mapJson = JSON.parse(urlAndMap.map);
+        } catch(e) {}
+      } else {
+        mapJson = urlAndMap.map;
+      }
 
       // Load all sources stored inline with the source map into the file cache
       // to pretend like they are already loaded. They may not exist on disk.
-      if (mapJson.sourcesContent) {
+      if (mapJson && mapJson.sourcesContent) {
         mapJson.sources.forEach(function(source, i) {
           var contents = mapJson.sourcesContent[i];
           if (contents) {
@@ -231,14 +238,12 @@ function mapSourcePosition(position) {
     if (originalPosition.originalSource != null) {
       const source = supportRelativeURL(
         sourceMap.url, originalPosition.originalSource);
-      const ret = {
+      return {
         source,
         line: originalPosition.originalLine + 1,
         column: originalPosition.originalColumn,
         name: originalPosition.name
       };
-      // console.dir({originalPosition, ret});
-      return ret;
     }
   }
 
