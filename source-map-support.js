@@ -555,6 +555,19 @@ exports.install = function(options) {
     }
   }
 
+  // Use dynamicRequire to avoid including in browser bundles
+  var Module = dynamicRequire(module, 'module');
+
+  // Redirect subsequent imports of "source-map-support"
+  // to this package
+  const originalRequire = Module.prototype.require;
+  Module.prototype.require = function requireProxy(id) {
+    if (id === 'source-map-support') {
+      id = '@cspotcode/source-map-support';
+    }
+    return originalRequire.call(this, id);
+  }
+
   // Allow sources to be found by methods other than reading the files
   // directly from disk.
   if (options.retrieveFile) {
@@ -577,8 +590,6 @@ exports.install = function(options) {
 
   // Support runtime transpilers that include inline source maps
   if (options.hookRequire && !isInBrowser()) {
-    // Use dynamicRequire to avoid including in browser bundles
-    var Module = dynamicRequire(module, 'module');
     var $compile = Module.prototype._compile;
 
     if (!$compile.__sourceMapSupport) {
