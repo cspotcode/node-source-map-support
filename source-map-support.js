@@ -563,7 +563,7 @@ exports.install = function(options) {
   const originalResolveFilename = Module._resolveFilename;
   Module._resolveFilename = function resolveFilenameProxy(request, parent, isMain, options) {
     if (request === 'source-map-support') {
-      request = '@cspotcode/source-map-support';
+      request = require.resolve('@cspotcode/source-map-support');
     }
     return originalResolveFilename.call(this, request, parent, isMain, options);
   }
