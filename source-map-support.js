@@ -561,11 +561,11 @@ exports.install = function(options) {
   // Redirect subsequent imports of "source-map-support"
   // to this package
   const originalResolveFilename = Module._resolveFilename;
-  Module._resolveFilename = function resolveFilenameProxy(...args) {
-    if (args[0] === 'source-map-support') {
-      args[0] = '@cspotcode/source-map-support';
+  Module._resolveFilename = function resolveFilenameProxy(request, parent, isMain, options) {
+    if (request === 'source-map-support') {
+      request = '@cspotcode/source-map-support';
     }
-    return originalResolveFilename.call(this, ...args);
+    return originalResolveFilename.call(this, request, parent, isMain, options);
   }
 
   // Allow sources to be found by methods other than reading the files
