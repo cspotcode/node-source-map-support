@@ -85,14 +85,14 @@ function createMultiLineSourceMapWithSourcesContent() {
   return sourceMap;
 }
 
-function compareStackTrace(sourceMap, source, expected) {
+async function compareStackTrace(sourceMap, source, expected) {
   // Check once with a separate source map
   fs.writeFileSync('.generated.js.map', sourceMap.toString());
-  fs.writeFileSync('.generated.js', 'exports.test = function() {' +
+  fs.writeFileSync('.generated.js', 'exports.test = async function() {' +
     source.join('\n') + '};//@ sourceMappingURL=.generated.js.map');
   try {
     delete require.cache[require.resolve('./.generated')];
-    require('./.generated').test();
+    await require('./.generated').test();
   } catch (e) {
     compareLines(e.stack.split(/\r\n|\n/), expected);
   }
@@ -100,44 +100,46 @@ function compareStackTrace(sourceMap, source, expected) {
   fs.unlinkSync('.generated.js.map');
 
   // Check again with an inline source map (in a data URL)
-  fs.writeFileSync('.generated.js', 'exports.test = function() {' +
+  fs.writeFileSync('.generated.js', 'exports.test = async function() {' +
     source.join('\n') + '};//@ sourceMappingURL=data:application/json;base64,' +
     bufferFrom(sourceMap.toString()).toString('base64'));
   try {
     delete require.cache[require.resolve('./.generated')];
-    require('./.generated').test();
+    await require('./.generated').test();
   } catch (e) {
     compareLines(e.stack.split(/\r\n|\n/), expected);
   }
   fs.unlinkSync('.generated.js');
 }
 
-function compareStdout(done, sourceMap, source, expected) {
+async function compareStdout(sourceMap, source, expected) {
   fs.writeFileSync('.original.js', 'this is the original code');
   fs.writeFileSync('.generated.js.map', sourceMap.toString());
   fs.writeFileSync('.generated.js', source.join('\n') +
     '//@ sourceMappingURL=.generated.js.map');
-  child_process.exec('node ./.generated', function(error, stdout, stderr) {
-    try {
-      compareLines(
-        (stdout + stderr)
-          .trim()
-          .split(/\r\n|\n/)
-          .filter(function (line) { return line !== '' }), // Empty lines are not relevant.
-        expected
-      );
-    } catch (e) {
-      return done(e);
-    }
-    fs.unlinkSync('.generated.js');
-    fs.unlinkSync('.generated.js.map');
-    fs.unlinkSync('.original.js');
-    done();
+  const {stdout, stderr} = await child_process_exec('node ./.generated');
+  compareLines(
+    (stdout + stderr)
+      .trim()
+      .split(/\r\n|\n/)
+      .filter(function (line) { return line !== '' }), // Empty lines are not relevant.
+    expected
+  );
+  fs.unlinkSync('.generated.js');
+  fs.unlinkSync('.generated.js.map');
+  fs.unlinkSync('.original.js');
+}
+
+async function child_process_exec(command) {
+  return new Promise((resolve) => {
+    child_process.exec(command, (error, stdout, stderr) => {
+      resolve({stdout, stderr});
+    });
   });
 }
 
-it('normal throw', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('normal throw', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'throw new Error("test");'
   ], [
     'Error: test',
@@ -148,8 +150,8 @@ it('normal throw', function() {
 /* The following test duplicates some of the code in
  * `normal throw` but triggers file read failure.
  */
-it('fs.readFileSync failure', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('fs.readFileSync failure', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'var fs = require("fs");',
     'var rfs = fs.readFileSync;',
     'fs.readFileSync = function() {',
@@ -167,8 +169,8 @@ it('fs.readFileSync failure', function() {
 });
 
 
-it('throw inside function', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('throw inside function', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'function foo() {',
     '  throw new Error("test");',
     '}',
@@ -180,8 +182,8 @@ it('throw inside function', function() {
   ]);
 });
 
-it('throw inside function inside function', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('throw inside function inside function', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'function foo() {',
     '  function bar() {',
     '    throw new Error("test");',
@@ -197,8 +199,8 @@ it('throw inside function inside function', function() {
   ]);
 });
 
-it('eval', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('eval', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'eval("throw new Error(\'test\')");'
   ], [
     'Error: test',
@@ -210,8 +212,8 @@ it('eval', function() {
   ]);
 });
 
-it('eval inside eval', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('eval inside eval', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'eval("eval(\'throw new Error(\\"test\\")\')");'
   ], [
     'Error: test',
@@ -221,8 +223,8 @@ it('eval inside eval', function() {
   ]);
 });
 
-it('eval inside function', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('eval inside function', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'function foo() {',
     '  eval("throw new Error(\'test\')");',
     '}',
@@ -235,8 +237,8 @@ it('eval inside function', function() {
   ]);
 });
 
-it('eval with sourceURL', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('eval with sourceURL', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'eval("throw new Error(\'test\')//@ sourceURL=sourceURL.js");'
   ], [
     'Error: test',
@@ -245,8 +247,8 @@ it('eval with sourceURL', function() {
   ]);
 });
 
-it('eval with sourceURL inside eval', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('eval with sourceURL inside eval', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'eval("eval(\'throw new Error(\\"test\\")//@ sourceURL=sourceURL.js\')");'
   ], [
     'Error: test',
@@ -256,8 +258,8 @@ it('eval with sourceURL inside eval', function() {
   ]);
 });
 
-it('native function', function() {
-  compareStackTrace(createSingleLineSourceMap(), [
+it('native function', async function() {
+  await compareStackTrace(createSingleLineSourceMap(), [
     '[1].map(function(x) { throw new Error(x); });'
   ], [
     'Error: 1',
@@ -266,25 +268,42 @@ it('native function', function() {
   ]);
 });
 
-it('function constructor', function() {
-  compareStackTrace(createMultiLineSourceMap(), [
+it('function constructor', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
     'throw new Function(")");'
   ], [
     /SyntaxError: Unexpected token '?\)'?/,
   ]);
 });
 
-it('throw with empty source map', function() {
-  compareStackTrace(createEmptySourceMap(), [
-    'throw new Error("test");'
+it('async stack frames', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
+    'async function foo() {',
+    '    await bar();',
+    '}',
+    'async function bar() {',
+    '    await null;',
+    '    throw new Error("test");',
+    '}',
+    'await foo();',
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?\.generated.js:1:34\)$/
+    /^    at bar \((?:.*[/\\])?line6\.js:1006:106\)/,
+    /^    at async foo \((?:.*[/\\])?line2.js:1002:102\)$/
   ]);
 });
 
-it('throw in Timeout with empty source map', function(done) {
-  compareStdout(done, createEmptySourceMap(), [
+it('throw with empty source map', async function() {
+  await compareStackTrace(createEmptySourceMap(), [
+    'throw new Error("test");'
+  ], [
+    'Error: test',
+    /^    at Object\.exports\.test \((?:.*[/\\])?\.generated.js:1:40\)$/
+  ]);
+});
+
+it('throw in Timeout with empty source map', async function() {
+  await compareStdout(createEmptySourceMap(), [
     'require("./source-map-support").install();',
     'setTimeout(function () {',
     '    throw new Error("this is the error")',
@@ -298,17 +317,17 @@ it('throw in Timeout with empty source map', function(done) {
   ]);
 });
 
-it('throw with source map with gap', function() {
-  compareStackTrace(createSourceMapWithGap(), [
+it('throw with source map with gap', async function() {
+  await compareStackTrace(createSourceMapWithGap(), [
     'throw new Error("test");'
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?\.generated\.js:1:34\)$/
+    /^    at Object\.exports\.test \((?:.*[/\\])?\.generated\.js:1:40\)$/
   ]);
 });
 
-it('sourcesContent with data URL', function() {
-  compareStackTrace(createMultiLineSourceMapWithSourcesContent(), [
+it('sourcesContent with data URL', async function() {
+  await compareStackTrace(createMultiLineSourceMapWithSourcesContent(), [
     'throw new Error("test");'
   ], [
     'Error: test',
@@ -316,9 +335,9 @@ it('sourcesContent with data URL', function() {
   ]);
 });
 
-it('finds the last sourceMappingURL', function() {
-  compareStackTrace(createMultiLineSourceMapWithSourcesContent(), [
-    '//# sourceMappingURL=missing.map.js',  // NB: compareStackTrace adds another source mapping.
+it('finds the last sourceMappingURL', async function() {
+  await compareStackTrace(createMultiLineSourceMapWithSourcesContent(), [
+    '//# sourceMappingURL=missing.map.js',  // NB: await compareStackTrace adds another source mapping.
     'throw new Error("test");'
   ], [
     'Error: test',
@@ -326,7 +345,7 @@ it('finds the last sourceMappingURL', function() {
   ]);
 });
 
-it('maps original name from source', function() {
+it('maps original name from source', async function() {
   var sourceMap = createEmptySourceMap();
   sourceMap.addMapping({
     generated: { line: 2, column: 8 },
@@ -339,7 +358,7 @@ it('maps original name from source', function() {
     source: ".original.js",
     name: "myOriginalName"
   });
-  compareStackTrace(sourceMap, [
+  await compareStackTrace(sourceMap, [
     'function foo() {',
     '  throw new Error("test");',
     '}',
@@ -351,8 +370,8 @@ it('maps original name from source', function() {
   ]);
 });
 
-it('default options', function(done) {
-  compareStdout(done, createSecondLineSourceMap(), [
+it('default options', async function() {
+  await compareStdout(createSecondLineSourceMap(), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
@@ -367,8 +386,8 @@ it('default options', function(done) {
   ]);
 });
 
-it('handleUncaughtExceptions is true', function(done) {
-  compareStdout(done, createSecondLineSourceMap(), [
+it('handleUncaughtExceptions is true', async function() {
+  await compareStdout(createSecondLineSourceMap(), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install({ handleUncaughtExceptions: true });',
@@ -382,8 +401,8 @@ it('handleUncaughtExceptions is true', function(done) {
   ]);
 });
 
-it('handleUncaughtExceptions is false', function(done) {
-  compareStdout(done, createSecondLineSourceMap(), [
+it('handleUncaughtExceptions is false', async function() {
+  await compareStdout(createSecondLineSourceMap(), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install({ handleUncaughtExceptions: false });',
@@ -401,8 +420,8 @@ it('handleUncaughtExceptions is false', function(done) {
   ]);
 });
 
-it('default options with empty source map', function(done) {
-  compareStdout(done, createEmptySourceMap(), [
+it('default options with empty source map', async function() {
+  await compareStdout(createEmptySourceMap(), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
@@ -416,8 +435,8 @@ it('default options with empty source map', function(done) {
   ]);
 });
 
-it('default options with source map with gap', function(done) {
-  compareStdout(done, createSourceMapWithGap(), [
+it('default options with source map with gap', async function() {
+  await compareStdout(createSourceMapWithGap(), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
@@ -431,8 +450,8 @@ it('default options with source map with gap', function(done) {
   ]);
 });
 
-it('specifically requested error source', function(done) {
-  compareStdout(done, createSecondLineSourceMap(), [
+it('specifically requested error source', async function() {
+  await compareStdout(createSecondLineSourceMap(), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'var sms = require("./source-map-support");',
@@ -446,8 +465,8 @@ it('specifically requested error source', function(done) {
   ]);
 });
 
-it('sourcesContent', function(done) {
-  compareStdout(done, createMultiLineSourceMapWithSourcesContent(), [
+it('sourcesContent', async function() {
+  await compareStdout(createMultiLineSourceMapWithSourcesContent(), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
@@ -462,8 +481,8 @@ it('sourcesContent', function(done) {
   ]);
 });
 
-it('missing source maps should also be cached', function(done) {
-  compareStdout(done, createSingleLineSourceMap(), [
+it('missing source maps should also be cached', async function() {
+  await compareStdout(createSingleLineSourceMap(), [
     '',
     'var count = 0;',
     'function foo() {',
@@ -488,8 +507,8 @@ it('missing source maps should also be cached', function(done) {
   ]);
 });
 
-it('should consult all retrieve source map providers', function(done) {
-  compareStdout(done, createSingleLineSourceMap(), [
+it('should consult all retrieve source map providers', async function() {
+  await compareStdout(createSingleLineSourceMap(), [
     '',
     'var count = 0;',
     'function foo() {',
@@ -521,7 +540,7 @@ it('should consult all retrieve source map providers', function(done) {
   ]);
 });
 
-it('should allow for runtime inline source maps', function(done) {
+it('should allow for runtime inline source maps', async function() {
   var sourceMap = createMultiLineSourceMapWithSourcesContent();
 
   fs.writeFileSync('.generated.jss', 'foo');
@@ -562,7 +581,7 @@ it('should allow for runtime inline source maps', function(done) {
  * `compareStackTrace` but appends a charset to the
  * source mapping url.
  */
-it('finds source maps with charset specified', function() {
+it('finds source maps with charset specified', async function() {
   var sourceMap = createMultiLineSourceMap()
   var source = [ 'throw new Error("test");' ];
   var expected = [
@@ -570,12 +589,12 @@ it('finds source maps with charset specified', function() {
     /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
   ];
 
-  fs.writeFileSync('.generated.js', 'exports.test = function() {' +
+  fs.writeFileSync('.generated.js', 'exports.test = async function() {' +
     source.join('\n') + '};//@ sourceMappingURL=data:application/json;charset=utf8;base64,' +
     bufferFrom(sourceMap.toString()).toString('base64'));
   try {
     delete require.cache[require.resolve('./.generated')];
-    require('./.generated').test();
+    await require('./.generated').test();
   } catch (e) {
     compareLines(e.stack.split(/\r\n|\n/), expected);
   }
@@ -583,10 +602,10 @@ it('finds source maps with charset specified', function() {
 });
 
 /* The following test duplicates some of the code in
- * `compareStackTrace` but appends some code and a
+ * `await compareStackTrace` but appends some code and a
  * comment to the source mapping url.
  */
-it('allows code/comments after sourceMappingURL', function() {
+it('allows code/comments after sourceMappingURL', async function() {
   var sourceMap = createMultiLineSourceMap()
   var source = [ 'throw new Error("test");' ];
   var expected = [
@@ -594,20 +613,20 @@ it('allows code/comments after sourceMappingURL', function() {
     /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
   ];
 
-  fs.writeFileSync('.generated.js', 'exports.test = function() {' +
+  fs.writeFileSync('.generated.js', 'exports.test = async function() {' +
     source.join('\n') + '};//# sourceMappingURL=data:application/json;base64,' +
     bufferFrom(sourceMap.toString()).toString('base64') +
     '\n// Some comment below the sourceMappingURL\nvar foo = 0;');
   try {
     delete require.cache[require.resolve('./.generated')];
-    require('./.generated').test();
+    await require('./.generated').test();
   } catch (e) {
     compareLines(e.stack.split(/\r\n|\n/), expected);
   }
   fs.unlinkSync('.generated.js');
 });
 
-it('handleUncaughtExceptions is true with existing listener', function(done) {
+it('handleUncaughtExceptions is true with existing listener', async function() {
   var source = [
     'process.on("uncaughtException", function() { /* Silent */ });',
     'function foo() { throw new Error("this is the error"); }',
@@ -620,17 +639,15 @@ it('handleUncaughtExceptions is true with existing listener', function(done) {
   fs.writeFileSync('.generated.js.map', createSingleLineSourceMap().toString());
   fs.writeFileSync('.generated.js', source.join('\n'));
 
-  child_process.exec('node ./.generated', function(error, stdout, stderr) {
-    fs.unlinkSync('.generated.js');
-    fs.unlinkSync('.generated.js.map');
-    fs.unlinkSync('.original.js');
-    assert.equal((stdout + stderr).trim(), '');
-    done();
-  });
+  const {stdout, stderr} = await child_process_exec('node ./.generated');
+  fs.unlinkSync('.generated.js');
+  fs.unlinkSync('.generated.js.map');
+  fs.unlinkSync('.original.js');
+  assert.equal((stdout + stderr).trim(), '');
 });
 
-it('normal console.trace', function(done) {
-  compareStdout(done, createMultiLineSourceMap(), [
+it('normal console.trace', async function() {
+  await compareStdout(createMultiLineSourceMap(), [
     'require("./source-map-support").install();',
     'console.trace("test");'
   ], [
