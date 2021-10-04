@@ -60,3 +60,8 @@ export function resetRetrieveHandlers(): void;
  * @param options Can be used to e.g. disable uncaughtException handler.
  */
 export function install(options?: Options): void;
+
+/**
+ * Uninstall SourceMap support.
+ */
+export function uninstall(): void;
