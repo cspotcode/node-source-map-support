@@ -38,8 +38,9 @@ export interface Options {
     /**
      * Callback will be called every time we redirect due to `redirectConflictingLibrary`
      * This allows consumers to log helpful warnings if they choose.
+     * @param parent NodeJS.Module which made the require() or require.resolve() call
      */
-    onConflictingLibraryRedirect?: (request, parent, isMain, redirectedRequest) => void;
+    onConflictingLibraryRedirect?: (request: string, parent: any, isMain: boolean, redirectedRequest: string) => void;
 }
 
 export interface Position {

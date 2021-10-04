@@ -1,4 +1,5 @@
-require('./source-map-support').install({
+const underTest = require('./source-map-support');
+underTest.install({
   emptyCacheBetweenOperations: true // Needed to be able to test for failure
 });
 
@@ -679,4 +680,37 @@ it('supports multiple instances', function(done) {
     'Error: this is the error',
     /^    at foo \((?:.*[/\\])?.original2\.js:1:1\)$/
   ]);
+});
+
+describe('redirects require() of "source-map-support" to this module', function() {
+  it('redirects', function() {
+    assert.strictEqual(require.resolve('source-map-support'), require.resolve('.'));
+    assert.strictEqual(require.resolve('source-map-support/register'), require.resolve('./register'));
+    assert.strictEqual(require('source-map-support'), require('.'));
+  });
+
+  it('emits notifications', function() {
+    let onConflictingLibraryRedirectCalls = [];
+    let onConflictingLibraryRedirectCalls2 = [];
+    underTest.install({
+      onConflictingLibraryRedirect(request, parent, isMain, redirectedRequest) {
+        onConflictingLibraryRedirectCalls.push([...arguments]);
+      }
+    });
+    underTest.install({
+      onConflictingLibraryRedirect(request, parent, isMain, redirectedRequest) {
+        onConflictingLibraryRedirectCalls2.push([...arguments]);
+      }
+    });
+    require.resolve('source-map-support');
+    assert.strictEqual(onConflictingLibraryRedirectCalls.length, 1);
+    assert.strictEqual(onConflictingLibraryRedirectCalls2.length, 1);
+    for(const args of [onConflictingLibraryRedirectCalls[0], onConflictingLibraryRedirectCalls2[0]]) {
+      const [request, parent, isMain, redirectedRequest] = args;
+      assert.strictEqual(request, 'source-map-support');
+      assert.strictEqual(parent, module);
+      assert.strictEqual(isMain, false);
+      assert.strictEqual(redirectedRequest, require.resolve('.'));
+    }
+  });
 });
