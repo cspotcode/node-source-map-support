@@ -560,12 +560,22 @@ exports.install = function(options) {
 
   // Redirect subsequent imports of "source-map-support"
   // to this package
-  const originalResolveFilename = Module._resolveFilename;
-  Module._resolveFilename = function resolveFilenameProxy(request, parent, isMain, options) {
-    if (request === 'source-map-support') {
-      request = require.resolve('@cspotcode/source-map-support');
+  const {redirectConflictingLibrary = true, onConflictingLibraryRedirect} = options;
+  if(redirectConflictingLibrary) {
+    const originalResolveFilename = Module._resolveFilename;
+    Module._resolveFilename = function resolveFilenameProxy(request, parent, isMain, options) {
+      // Match all source-map-support entrypoints: source-map-support, source-map-support/register
+      if (request === 'source-map-support') {
+          const newRequest = require.resolve('./');
+          if(onConflictingLibraryRedirect) onConflictingLibraryRedirect(request, parent, isMain, options, newRequest);
+          request = newRequest;
+      } else if (request === 'source-map-support/register') {
+          const newRequest = require.resolve('./register');
+          if(onConflictingLibraryRedirect) onConflictingLibraryRedirect(request, parent, isMain, options, newRequest);
+          request = newRequest;
+      }
+      return originalResolveFilename.call(this, request, parent, isMain, options);
     }
-    return originalResolveFilename.call(this, request, parent, isMain, options);
   }
 
   // Allow sources to be found by methods other than reading the files

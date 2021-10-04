@@ -31,6 +31,15 @@ export interface Options {
     overrideRetrieveSourceMap?: boolean | undefined;
     retrieveFile?(path: string): string;
     retrieveSourceMap?(source: string): UrlAndMap | null;
+    /**
+     * Set false to disable redirection of require / import `source-map-support` to `@cspotcode/source-map-support`
+     */
+    redirectConflictingLibrary?: boolean;
+    /**
+     * Callback will be called every time we redirect due to `redirectConflictingLibrary`
+     * This allows consumers to log helpful warnings if they choose.
+     */
+    onConflictingLibraryRedirect?: (request, parent, isMain, redirectedRequest) => void;
 }
 
 export interface Position {
