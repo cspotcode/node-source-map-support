@@ -77,6 +77,8 @@ var sharedData = initializeSharedData({
   errorPrepareStackTraceHook: undefined,
   /** @type {HookState} */
   processEmitHook: undefined,
+  /** @type {HookState} */
+  moduleResolveFilenameHook: undefined,
 
   // If true, the caches are reset before a stack trace formatting operation
   emptyCacheBetweenOperations: false,
@@ -639,9 +641,14 @@ exports.install = function(options) {
   // Redirect subsequent imports of "source-map-support"
   // to this package
   const {redirectConflictingLibrary = true, onConflictingLibraryRedirect} = options;
-  if(redirectConflictingLibrary) {
-    const originalResolveFilename = Module._resolveFilename;
-    Module._resolveFilename = function resolveFilenameProxy(request, parent, isMain, options) {
+  if(redirectConflictingLibrary && !sharedData.moduleResolveFilenameHook) {
+    const originalValue = Module._resolveFilename;
+    sharedData.moduleResolveFilenameHook = {
+      enabled: true,
+      originalValue,
+      installedValue: undefined
+    }
+    Module._resolveFilename = sharedData.moduleResolveFilenameHook.installedValue = function (request, parent, isMain, options) {
       // Match all source-map-support entrypoints: source-map-support, source-map-support/register
       if (request === 'source-map-support') {
           const newRequest = require.resolve('./');
@@ -652,7 +659,7 @@ exports.install = function(options) {
           if(onConflictingLibraryRedirect) onConflictingLibraryRedirect(request, parent, isMain, options, newRequest);
           request = newRequest;
       }
-      return originalResolveFilename.call(this, request, parent, isMain, options);
+      return originalValue.call(this, request, parent, isMain, options);
     }
   }
 
@@ -758,6 +765,16 @@ exports.uninstall = function() {
       Error.prepareStackTrace = sharedData.errorPrepareStackTraceHook.originalValue;
     }
     sharedData.errorPrepareStackTraceHook = undefined;
+  }
+  if (sharedData.moduleResolveFilenameHook) {
+    // Disable behavior
+    sharedData.moduleResolveFilenameHook.enabled = false;
+    // If possible, remove our hook function.  May not be possible if subsequent third-party hooks have wrapped around us.
+    var Module = dynamicRequire(module, 'module');
+    if(Module._resolveFilename === sharedData.moduleResolveFilenameHook.installedValue) {
+      Module._resolveFilename = sharedData.moduleResolveFilenameHook.originalValue;
+    }
+    sharedData.moduleResolveFilenameHook = undefined;
   }
 }
 

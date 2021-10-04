@@ -1,8 +1,10 @@
 // Note: some tests rely on side-effects from prior tests.
 // You may not get meaningful results running a subset of tests.
 
+const Module = require('module');
 const priorErrorPrepareStackTrace = Error.prepareStackTrace;
 const priorProcessEmit = process.emit;
+const priorResolveFilename = Module._resolveFilename;
 const underTest = require('./source-map-support');
 var SourceMapGenerator = require('source-map').SourceMapGenerator;
 var child_process = require('child_process');
@@ -742,11 +744,13 @@ describe('uninstall', function() {
     underTest.uninstall();
     process.emit = priorProcessEmit;
     Error.prepareStackTrace = priorErrorPrepareStackTrace;
+    Module._resolveFilename = priorResolveFilename;
   });
 
   it('uninstall removes hooks and source-mapping behavior', function() {
     assert.strictEqual(Error.prepareStackTrace, priorErrorPrepareStackTrace);
     assert.strictEqual(process.emit, priorProcessEmit);
+    assert.strictEqual(Module._resolveFilename, priorResolveFilename);
     normalThrowWithoutSourceMapSupportInstalled();
   });
 
@@ -804,6 +808,22 @@ describe('uninstall', function() {
     assert.strictEqual(process.emit, thirdPartyProcessEmit);
     normalThrowWithoutSourceMapSupportInstalled();
     process.emit('foo');
+    assert(peInvocations >= 1);
+  });
+
+  it('uninstall preserves third-party module._resolveFilename hooks installed after us', function() {
+    installSms();
+    const wrappedResolveFilename = Module._resolveFilename;
+    let peInvocations = 0;
+    function thirdPartyModuleResolveFilename() {
+      peInvocations++;
+      return wrappedResolveFilename.apply(this, arguments);
+    }
+    Module._resolveFilename = thirdPartyModuleResolveFilename;
+    underTest.uninstall();
+    assert.strictEqual(Module._resolveFilename, thirdPartyModuleResolveFilename);
+    normalThrowWithoutSourceMapSupportInstalled();
+    Module._resolveFilename('repl');
     assert(peInvocations >= 1);
   });
 });
