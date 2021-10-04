@@ -77,7 +77,7 @@ var sharedData = initializeSharedData({
   errorPrepareStackTraceHook: undefined,
   /** @type {HookState} */
   processEmitHook: undefined,
-  /** @type {HookState} */
+  /** @type {HookState & { onConflictingLibraryRedirectArr: Array<(request: string, parent: any, isMain: boolean, redirectedRequest: string) => void> }} */
   moduleResolveFilenameHook: undefined,
 
   // If true, the caches are reset before a stack trace formatting operation
@@ -641,25 +641,36 @@ exports.install = function(options) {
   // Redirect subsequent imports of "source-map-support"
   // to this package
   const {redirectConflictingLibrary = true, onConflictingLibraryRedirect} = options;
-  if(redirectConflictingLibrary && !sharedData.moduleResolveFilenameHook) {
-    const originalValue = Module._resolveFilename;
-    sharedData.moduleResolveFilenameHook = {
-      enabled: true,
-      originalValue,
-      installedValue: undefined
-    }
-    Module._resolveFilename = sharedData.moduleResolveFilenameHook.installedValue = function (request, parent, isMain, options) {
-      // Match all source-map-support entrypoints: source-map-support, source-map-support/register
-      if (request === 'source-map-support') {
-          const newRequest = require.resolve('./');
-          if(onConflictingLibraryRedirect) onConflictingLibraryRedirect(request, parent, isMain, options, newRequest);
-          request = newRequest;
-      } else if (request === 'source-map-support/register') {
-          const newRequest = require.resolve('./register');
-          if(onConflictingLibraryRedirect) onConflictingLibraryRedirect(request, parent, isMain, options, newRequest);
-          request = newRequest;
+  if(redirectConflictingLibrary) {
+    if (!sharedData.moduleResolveFilenameHook) {
+      const originalValue = Module._resolveFilename;
+      sharedData.moduleResolveFilenameHook = {
+        enabled: true,
+        originalValue,
+        installedValue: undefined,
+        onConflictingLibraryRedirectArr: []
       }
-      return originalValue.call(this, request, parent, isMain, options);
+      Module._resolveFilename = sharedData.moduleResolveFilenameHook.installedValue = function (request, parent, isMain, options) {
+        // Match all source-map-support entrypoints: source-map-support, source-map-support/register
+        let requestRedirect;
+        if (request === 'source-map-support') {
+          requestRedirect = './';
+        } else if (request === 'source-map-support/register') {
+          requestRedirect = './register';
+        }
+
+        if (requestRedirect !== undefined) {
+            const newRequest = require.resolve(requestRedirect);
+            for (const cb of sharedData.moduleResolveFilenameHook.onConflictingLibraryRedirectArr) {
+              cb(request, parent, isMain, options, newRequest);
+            }
+            request = newRequest;
+        }
+        return originalValue.call(this, request, parent, isMain, options);
+      }
+    } 
+    if (onConflictingLibraryRedirect) {
+      sharedData.moduleResolveFilenameHook.onConflictingLibraryRedirectArr.push(onConflictingLibraryRedirect);
     }
   }
 

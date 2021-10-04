@@ -730,10 +730,11 @@ describe('redirects require() of "source-map-support" to this module', function(
     assert.strictEqual(onConflictingLibraryRedirectCalls.length, 1);
     assert.strictEqual(onConflictingLibraryRedirectCalls2.length, 1);
     for(const args of [onConflictingLibraryRedirectCalls[0], onConflictingLibraryRedirectCalls2[0]]) {
-      const [request, parent, isMain, redirectedRequest] = args;
+      const [request, parent, isMain, options, redirectedRequest] = args;
       assert.strictEqual(request, 'source-map-support');
       assert.strictEqual(parent, module);
       assert.strictEqual(isMain, false);
+      assert.strictEqual(options, undefined);
       assert.strictEqual(redirectedRequest, require.resolve('.'));
     }
   });
