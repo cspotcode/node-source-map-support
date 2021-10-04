@@ -23,38 +23,86 @@ function dynamicRequire(mod, request) {
   return mod.require(request);
 }
 
-// Only install once if called multiple times
-// Remember how the environment looked before installation so we can restore if able
-/** @type {HookState} */
-var errorPrepareStackTraceHook;
-/** @type {HookState} */
-var processEmitHook;
 /**
  * @typedef {{
  *   enabled: boolean;
  *   originalValue: any;
  *   installedValue: any;
  * }} HookState
+ * Used for installing and uninstalling hooks
  */
 
-// If true, the caches are reset before a stack trace formatting operation
-var emptyCacheBetweenOperations = false;
+// Increment this if the format of sharedData changes in a breaking way.
+var sharedDataVersion = 1;
+
+function initializeSharedData(defaults) {
+  var sharedDataKey = 'source-map-support/sharedData';
+  if (typeof Symbol !== 'undefined') {
+    sharedDataKey = Symbol.for(sharedDataKey);
+  }
+  var sharedData = this[sharedDataKey];
+  if (!sharedData) {
+    sharedData = { version: sharedDataVersion };
+    if (Object.defineProperty) {
+      Object.defineProperty(this, sharedDataKey, { value: sharedData });
+    } else {
+      this[sharedDataKey] = sharedData;
+    }
+  }
+  if (sharedDataVersion !== sharedData.version) {
+    throw new Error("Multiple incompatible instances of source-map-support were loaded");
+  }
+  for (var key in defaults) {
+    if (!(key in sharedData)) {
+      sharedData[key] = defaults[key];
+    }
+  }
+  return sharedData;
+}
+
+// If multiple instances of source-map-support are loaded into the same
+// context, they shouldn't overwrite each other.  By storing handlers, caches,
+// and other state on a shared object, different instances of
+// source-map-support can work together in a limited way. This does require
+// that future versions of source-map-support continue to support the fields on
+// this object. If this internal contract ever needs to be broken, increment
+// sharedDataVersion. (This version number is not the same as any of the
+// package's version numbers, which should reflect the *external* API of
+// source-map-support.)
+var sharedData = initializeSharedData({
+
+  // Only install once if called multiple times
+  // Remember how the environment looked before installation so we can restore if able
+  /** @type {HookState} */
+  errorPrepareStackTraceHook: undefined,
+  /** @type {HookState} */
+  processEmitHook: undefined,
+
+  // If true, the caches are reset before a stack trace formatting operation
+  emptyCacheBetweenOperations: false,
+
+  // Maps a file path to a string containing the file contents
+  fileContentsCache: {},
+
+  // Maps a file path to a source map for that file
+  sourceMapCache: {},
+
+  // Priority list of retrieve handlers
+  retrieveFileHandlers: [],
+  retrieveMapHandlers: [],
+
+  // Priority list of internally-implemented handlers.
+  // When resetting state, we must keep these.
+  internalRetrieveFileHandlers: [],
+  internalRetrieveMapHandlers: [],
+
+});
 
 // Supports {browser, node, auto}
 var environment = "auto";
 
-// Maps a file path to a string containing the file contents
-var fileContentsCache = {};
-
-// Maps a file path to a source map for that file
-var sourceMapCache = {};
-
 // Regex for detecting source maps
 var reSourceMap = /^data:application\/json[^,]+base64,/;
-
-// Priority list of retrieve handlers
-var retrieveFileHandlers = [];
-var retrieveMapHandlers = [];
 
 function isInBrowser() {
   if (environment === "browser")
@@ -68,10 +116,16 @@ function hasGlobalProcessEventEmitter() {
   return ((typeof process === 'object') && (process !== null) && (typeof process.on === 'function'));
 }
 
-function handlerExec(list) {
+function handlerExec(list, internalList) {
   return function(arg) {
     for (var i = 0; i < list.length; i++) {
       var ret = list[i](arg);
+      if (ret) {
+        return ret;
+      }
+    }
+    for (var i = 0; i < internalList.length; i++) {
+      var ret = internalList[i](arg);
       if (ret) {
         return ret;
       }
@@ -80,9 +134,9 @@ function handlerExec(list) {
   };
 }
 
-var retrieveFile = handlerExec(retrieveFileHandlers);
+var retrieveFile = handlerExec(sharedData.retrieveFileHandlers, sharedData.internalRetrieveFileHandlers);
 
-retrieveFileHandlers.push(function(path) {
+sharedData.internalRetrieveFileHandlers.push(function(path) {
   // Trim the path to make sure there is no extra whitespace.
   path = path.trim();
   if (/^file:/.test(path)) {
@@ -93,8 +147,8 @@ retrieveFileHandlers.push(function(path) {
         '/'; // file:///root-dir/file -> /root-dir/file
     });
   }
-  if (path in fileContentsCache) {
-    return fileContentsCache[path];
+  if (path in sharedData.fileContentsCache) {
+    return sharedData.fileContentsCache[path];
   }
 
   var contents = '';
@@ -115,7 +169,7 @@ retrieveFileHandlers.push(function(path) {
     /* ignore any errors */
   }
 
-  return fileContentsCache[path] = contents;
+  return sharedData.fileContentsCache[path] = contents;
 });
 
 // Support URLs relative to a directory, but be careful about a protocol prefix
@@ -170,8 +224,8 @@ function retrieveSourceMapURL(source) {
 // there is no source map.  The map field may be either a string or the parsed
 // JSON object (ie, it must be a valid argument to the SourceMapConsumer
 // constructor).
-var retrieveSourceMap = handlerExec(retrieveMapHandlers);
-retrieveMapHandlers.push(function(source) {
+var retrieveSourceMap = handlerExec(sharedData.retrieveMapHandlers, sharedData.internalRetrieveMapHandlers);
+sharedData.internalRetrieveMapHandlers.push(function(source) {
   var sourceMappingURL = retrieveSourceMapURL(source);
   if (!sourceMappingURL) return null;
 
@@ -199,12 +253,12 @@ retrieveMapHandlers.push(function(source) {
 });
 
 function mapSourcePosition(position) {
-  var sourceMap = sourceMapCache[position.source];
+  var sourceMap = sharedData.sourceMapCache[position.source];
   if (!sourceMap) {
     // Call the (overrideable) retrieveSourceMap function to get the source map.
     var urlAndMap = retrieveSourceMap(position.source);
     if (urlAndMap) {
-      sourceMap = sourceMapCache[position.source] = {
+      sourceMap = sharedData.sourceMapCache[position.source] = {
         url: urlAndMap.url,
         map: new SourceMapConsumer(urlAndMap.map)
       };
@@ -216,12 +270,12 @@ function mapSourcePosition(position) {
           var contents = sourceMap.map.sourcesContent[i];
           if (contents) {
             var url = supportRelativeURL(sourceMap.url, source);
-            fileContentsCache[url] = contents;
+            sharedData.fileContentsCache[url] = contents;
           }
         });
       }
     } else {
-      sourceMap = sourceMapCache[position.source] = {
+      sourceMap = sharedData.sourceMapCache[position.source] = {
         url: null,
         map: null
       };
@@ -450,9 +504,9 @@ function createPrepareStackTrace(hookState) {
   function prepareStackTrace(error, stack) {
     if(!hookState.enabled) return hookState.originalValue.apply(this, arguments);
 
-    if (emptyCacheBetweenOperations) {
-      fileContentsCache = {};
-      sourceMapCache = {};
+    if (sharedData.emptyCacheBetweenOperations) {
+      sharedData.fileContentsCache = {};
+      sharedData.sourceMapCache = {};
     }
 
     // node gives its own errors special treatment.  Mimic that behavior
@@ -491,7 +545,7 @@ function getErrorSource(error) {
     var column = +match[3];
 
     // Support the inline sourceContents inside the source map
-    var contents = fileContentsCache[source];
+    var contents = sharedData.fileContentsCache[source];
 
     // Support files on disk
     if (!contents && fs && fs.existsSync(source)) {
@@ -537,7 +591,7 @@ function printFatalErrorUponExit (error) {
 
 function shimEmitUncaughtException () {
   const originalValue = process.emit;
-  var hook = processEmitHook = {
+  var hook = sharedData.processEmitHook = {
     enabled: true,
     originalValue,
     installedValue: undefined
@@ -545,7 +599,7 @@ function shimEmitUncaughtException () {
   var isTerminatingDueToFatalException = false;
   var fatalException;
 
-  process.emit = processEmitHook.installedValue = function (type) {
+  process.emit = sharedData.processEmitHook.installedValue = function (type) {
     const hadListeners = originalValue.apply(this, arguments);
     if(hook.enabled) {
       if (type === 'uncaughtException' && !hadListeners) {
@@ -561,8 +615,8 @@ function shimEmitUncaughtException () {
   };
 }
 
-var originalRetrieveFileHandlers = retrieveFileHandlers.slice(0);
-var originalRetrieveMapHandlers = retrieveMapHandlers.slice(0);
+var originalRetrieveFileHandlers = sharedData.retrieveFileHandlers.slice(0);
+var originalRetrieveMapHandlers = sharedData.retrieveMapHandlers.slice(0);
 
 exports.wrapCallSite = wrapCallSite;
 exports.getErrorSource = getErrorSource;
@@ -583,20 +637,20 @@ exports.install = function(options) {
   // directly from disk.
   if (options.retrieveFile) {
     if (options.overrideRetrieveFile) {
-      retrieveFileHandlers.length = 0;
+      sharedData.retrieveFileHandlers.length = 0;
     }
 
-    retrieveFileHandlers.unshift(options.retrieveFile);
+    sharedData.retrieveFileHandlers.unshift(options.retrieveFile);
   }
 
   // Allow source maps to be found by methods other than reading the files
   // directly from disk.
   if (options.retrieveSourceMap) {
     if (options.overrideRetrieveSourceMap) {
-      retrieveMapHandlers.length = 0;
+      sharedData.retrieveMapHandlers.length = 0;
     }
 
-    retrieveMapHandlers.unshift(options.retrieveSourceMap);
+    sharedData.retrieveMapHandlers.unshift(options.retrieveSourceMap);
   }
 
   // Support runtime transpilers that include inline source maps
@@ -607,8 +661,8 @@ exports.install = function(options) {
 
     if (!$compile.__sourceMapSupport) {
       Module.prototype._compile = function(content, filename) {
-        fileContentsCache[filename] = content;
-        sourceMapCache[filename] = undefined;
+        sharedData.fileContentsCache[filename] = content;
+        sharedData.sourceMapCache[filename] = undefined;
         return $compile.call(this, content, filename);
       };
 
@@ -617,24 +671,24 @@ exports.install = function(options) {
   }
 
   // Configure options
-  if (!emptyCacheBetweenOperations) {
-    emptyCacheBetweenOperations = 'emptyCacheBetweenOperations' in options ?
+  if (!sharedData.emptyCacheBetweenOperations) {
+    sharedData.emptyCacheBetweenOperations = 'emptyCacheBetweenOperations' in options ?
       options.emptyCacheBetweenOperations : false;
   }
 
 
   // Install the error reformatter
-  if (!errorPrepareStackTraceHook) {
+  if (!sharedData.errorPrepareStackTraceHook) {
     const originalValue = Error.prepareStackTrace;
-    errorPrepareStackTraceHook = {
+    sharedData.errorPrepareStackTraceHook = {
       enabled: true,
       originalValue,
       installedValue: undefined
     };
-    Error.prepareStackTrace = errorPrepareStackTraceHook.installedValue = createPrepareStackTrace(errorPrepareStackTraceHook);
+    Error.prepareStackTrace = sharedData.errorPrepareStackTraceHook.installedValue = createPrepareStackTrace(sharedData.errorPrepareStackTraceHook);
   }
 
-  if (!processEmitHook) {
+  if (!sharedData.processEmitHook) {
     var installHandler = 'handleUncaughtExceptions' in options ?
       options.handleUncaughtExceptions : true;
 
@@ -663,36 +717,30 @@ exports.install = function(options) {
 };
 
 exports.uninstall = function() {
-  if(processEmitHook) {
+  if(sharedData.processEmitHook) {
     // Disable behavior
-    processEmitHook.enabled = false;
+    sharedData.processEmitHook.enabled = false;
     // If possible, remove our hook function.  May not be possible if subsequent third-party hooks have wrapped around us.
-    if(process.emit === processEmitHook.installedValue) {
-      process.emit = processEmitHook.originalValue;
+    if(process.emit === sharedData.processEmitHook.installedValue) {
+      process.emit = sharedData.processEmitHook.originalValue;
     }
-    processEmitHook = undefined;
+    sharedData.processEmitHook = undefined;
   }
-  if(errorPrepareStackTraceHook) {
+  if(sharedData.errorPrepareStackTraceHook) {
     // Disable behavior
-    errorPrepareStackTraceHook.enabled = false;
+    sharedData.errorPrepareStackTraceHook.enabled = false;
     // If possible or necessary, remove our hook function.
     // In vanilla environments, prepareStackTrace is `undefined`.
     // We cannot delegate to `undefined` the way we can to a function w/`.apply()`; our only option is to remove the function.
     // If we are the *first* hook installed, and another was installed on top of us, we have no choice but to remove both.
-    if(Error.prepareStackTrace === errorPrepareStackTraceHook.installedValue || typeof errorPrepareStackTraceHook.originalValue !== 'function') {
-      Error.prepareStackTrace = errorPrepareStackTraceHook.originalValue;
+    if(Error.prepareStackTrace === sharedData.errorPrepareStackTraceHook.installedValue || typeof sharedData.errorPrepareStackTraceHook.originalValue !== 'function') {
+      Error.prepareStackTrace = sharedData.errorPrepareStackTraceHook.originalValue;
     }
-    errorPrepareStackTraceHook = undefined;
+    sharedData.errorPrepareStackTraceHook = undefined;
   }
 }
 
 exports.resetRetrieveHandlers = function() {
-  retrieveFileHandlers.length = 0;
-  retrieveMapHandlers.length = 0;
-
-  retrieveFileHandlers = originalRetrieveFileHandlers.slice(0);
-  retrieveMapHandlers = originalRetrieveMapHandlers.slice(0);
-
-  retrieveSourceMap = handlerExec(retrieveMapHandlers);
-  retrieveFile = handlerExec(retrieveFileHandlers);
+  sharedData.retrieveFileHandlers.length = 0;
+  sharedData.retrieveMapHandlers.length = 0;
 }
