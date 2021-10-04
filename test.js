@@ -1,7 +1,9 @@
-require('./source-map-support').install({
-  emptyCacheBetweenOperations: true // Needed to be able to test for failure
-});
+// Note: some tests rely on side-effects from prior tests.
+// You may not get meaningful results running a subset of tests.
 
+const priorErrorPrepareStackTrace = Error.prepareStackTrace;
+const priorProcessEmit = process.emit;
+const underTest = require('./source-map-support');
 var SourceMapGenerator = require('source-map').SourceMapGenerator;
 var child_process = require('child_process');
 var assert = require('assert');
@@ -136,14 +138,35 @@ function compareStdout(done, sourceMap, source, expected) {
   });
 }
 
+it('normal throw without source-map-support installed', normalThrowWithoutSourceMapSupportInstalled);
+
 it('normal throw', function() {
+  installSms();
+  normalThrow();
+});
+  
+function installSms() {
+  underTest.install({
+    emptyCacheBetweenOperations: true // Needed to be able to test for failure
+  });
+}
+
+function normalThrow() {
   compareStackTrace(createMultiLineSourceMap(), [
     'throw new Error("test");'
   ], [
     'Error: test',
     /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
   ]);
-});
+}
+function normalThrowWithoutSourceMapSupportInstalled() {
+  compareStackTrace(createMultiLineSourceMap(), [
+    'throw new Error("test");'
+  ], [
+    'Error: test',
+    /^    at Object\.exports\.test \((?:.*[/\\])?\.generated\.js:1:34\)$/
+  ]);
+}
 
 /* The following test duplicates some of the code in
  * `normal throw` but triggers file read failure.
@@ -637,4 +660,75 @@ it('normal console.trace', function(done) {
     'Trace: test',
     /^    at Object\.<anonymous> \((?:.*[/\\])?line2\.js:1002:102\)$/
   ]);
+});
+
+describe('uninstall', function() {
+  this.beforeEach(function() {
+    underTest.uninstall();
+    process.emit = priorProcessEmit;
+    Error.prepareStackTrace = priorErrorPrepareStackTrace;
+  });
+
+  it('uninstall removes hooks and source-mapping behavior', function() {
+    assert.strictEqual(Error.prepareStackTrace, priorErrorPrepareStackTrace);
+    assert.strictEqual(process.emit, priorProcessEmit);
+    normalThrowWithoutSourceMapSupportInstalled();
+  });
+
+  it('install re-adds hooks', function() {
+    installSms();
+    normalThrow();
+  });
+
+  it('uninstall removes prepareStackTrace even in presence of third-party hooks if none were installed before us', function() {
+    installSms();
+    const wrappedPrepareStackTrace = Error.prepareStackTrace;
+    let pstInvocations = 0;
+    function thirdPartyPrepareStackTraceHook() {
+      pstInvocations++;
+      return wrappedPrepareStackTrace.apply(this, arguments);
+    }
+    Error.prepareStackTrace = thirdPartyPrepareStackTraceHook;
+    underTest.uninstall();
+    assert.strictEqual(Error.prepareStackTrace, undefined);
+    assert(pstInvocations === 0);
+  });
+
+  it('uninstall preserves third-party prepareStackTrace hooks if one was installed before us', function() {
+    let beforeInvocations = 0;
+    function thirdPartyPrepareStackTraceHookInstalledBefore() {
+      beforeInvocations++;
+      return 'foo';
+    }
+    Error.prepareStackTrace = thirdPartyPrepareStackTraceHookInstalledBefore;
+    installSms();
+    const wrappedPrepareStackTrace = Error.prepareStackTrace;
+    let afterInvocations = 0;
+    function thirdPartyPrepareStackTraceHookInstalledAfter() {
+      afterInvocations++;
+      return wrappedPrepareStackTrace.apply(this, arguments);
+    }
+    Error.prepareStackTrace = thirdPartyPrepareStackTraceHookInstalledAfter;
+    underTest.uninstall();
+    assert.strictEqual(Error.prepareStackTrace, thirdPartyPrepareStackTraceHookInstalledAfter);
+    assert.strictEqual(new Error().stack, 'foo');
+    assert.strictEqual(beforeInvocations, 1);
+    assert.strictEqual(afterInvocations, 1);
+  });
+
+  it('uninstall preserves third-party process.emit hooks installed after us', function() {
+    installSms();
+    const wrappedProcessEmit = process.emit;
+    let peInvocations = 0;
+    function thirdPartyProcessEmit() {
+      peInvocations++;
+      return wrappedProcessEmit.apply(this, arguments);
+    }
+    process.emit = thirdPartyProcessEmit;
+    underTest.uninstall();
+    assert.strictEqual(process.emit, thirdPartyProcessEmit);
+    normalThrowWithoutSourceMapSupportInstalled();
+    process.emit('foo');
+    assert(peInvocations >= 1);
+  });
 });
