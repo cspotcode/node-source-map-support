@@ -23,6 +23,15 @@ function dynamicRequire(mod, request) {
   return mod.require(request);
 }
 
+/**
+ * @typedef {{
+ *   enabled: boolean;
+ *   originalValue: any;
+ *   installedValue: any;
+ * }} HookState
+ * Used for installing and uninstalling hooks
+ */
+
 // Increment this if the format of sharedData changes in a breaking way.
 var sharedDataVersion = 1;
 
@@ -63,8 +72,11 @@ function initializeSharedData(defaults) {
 var sharedData = initializeSharedData({
 
   // Only install once if called multiple times
-  errorFormatterInstalled: false,
-  uncaughtShimInstalled: false,
+  // Remember how the environment looked before installation so we can restore if able
+  /** @type {HookState} */
+  errorPrepareStackTraceHook: undefined,
+  /** @type {HookState} */
+  processEmitHook: undefined,
 
   // If true, the caches are reset before a stack trace formatting operation
   emptyCacheBetweenOperations: false,
@@ -483,38 +495,45 @@ try {
 
 const ErrorPrototypeToString = (err) =>Error.prototype.toString.call(err);
 
-// This function is part of the V8 stack trace API, for more info see:
-// https://v8.dev/docs/stack-trace-api
-function prepareStackTrace(error, stack) {
-  if (sharedData.emptyCacheBetweenOperations) {
-    sharedData.fileContentsCache = {};
-    sharedData.sourceMapCache = {};
-  }
+/** @param {HookState} hookState */
+function createPrepareStackTrace(hookState) {
+  return prepareStackTrace;
 
-  // node gives its own errors special treatment.  Mimic that behavior
-  // https://github.com/nodejs/node/blob/3cbaabc4622df1b4009b9d026a1a970bdbae6e89/lib/internal/errors.js#L118-L128
-  // https://github.com/nodejs/node/pull/39182
-  var errorString;
-  if (kIsNodeError) {
-    if(kIsNodeError in error) {
-      errorString = `${error.name} [${error.code}]: ${error.message}`;
-    } else {
-      errorString = ErrorPrototypeToString(error);
+  // This function is part of the V8 stack trace API, for more info see:
+  // https://v8.dev/docs/stack-trace-api
+  function prepareStackTrace(error, stack) {
+    if(!hookState.enabled) return hookState.originalValue.apply(this, arguments);
+
+    if (sharedData.emptyCacheBetweenOperations) {
+      sharedData.fileContentsCache = {};
+      sharedData.sourceMapCache = {};
     }
-  } else {
-    var name = error.name || 'Error';
-    var message = error.message || '';
-    errorString = name + ": " + message;
-  }
 
-  var state = { nextPosition: null, curPosition: null };
-  var processedStack = [];
-  for (var i = stack.length - 1; i >= 0; i--) {
-    processedStack.push('\n    at ' + wrapCallSite(stack[i], state));
-    state.nextPosition = state.curPosition;
+    // node gives its own errors special treatment.  Mimic that behavior
+    // https://github.com/nodejs/node/blob/3cbaabc4622df1b4009b9d026a1a970bdbae6e89/lib/internal/errors.js#L118-L128
+    // https://github.com/nodejs/node/pull/39182
+    var errorString;
+    if (kIsNodeError) {
+      if(kIsNodeError in error) {
+        errorString = `${error.name} [${error.code}]: ${error.message}`;
+      } else {
+        errorString = ErrorPrototypeToString(error);
+      }
+    } else {
+      var name = error.name || 'Error';
+      var message = error.message || '';
+      errorString = name + ": " + message;
+    }
+
+    var state = { nextPosition: null, curPosition: null };
+    var processedStack = [];
+    for (var i = stack.length - 1; i >= 0; i--) {
+      processedStack.push('\n    at ' + wrapCallSite(stack[i], state));
+      state.nextPosition = state.curPosition;
+    }
+    state.curPosition = state.nextPosition = null;
+    return errorString + processedStack.reverse().join('');
   }
-  state.curPosition = state.nextPosition = null;
-  return errorString + processedStack.reverse().join('');
 }
 
 // Generate position and snippet of original source with pointer
@@ -571,19 +590,26 @@ function printFatalErrorUponExit (error) {
 }
 
 function shimEmitUncaughtException () {
-  var origEmit = process.emit;
+  const originalValue = process.emit;
+  var hook = sharedData.processEmitHook = {
+    enabled: true,
+    originalValue,
+    installedValue: undefined
+  };
   var isTerminatingDueToFatalException = false;
   var fatalException;
 
-  process.emit = function (type) {
-    const hadListeners = origEmit.apply(this, arguments);
-    if (type === 'uncaughtException' && !hadListeners) {
-      isTerminatingDueToFatalException = true;
-      fatalException = arguments[1];
-      process.exit(1);
-    }
-    if (type === 'exit' && isTerminatingDueToFatalException) {
-      printFatalErrorUponExit(fatalException);
+  process.emit = sharedData.processEmitHook.installedValue = function (type) {
+    const hadListeners = originalValue.apply(this, arguments);
+    if(hook.enabled) {
+      if (type === 'uncaughtException' && !hadListeners) {
+        isTerminatingDueToFatalException = true;
+        fatalException = arguments[1];
+        process.exit(1);
+      }
+      if (type === 'exit' && isTerminatingDueToFatalException) {
+        printFatalErrorUponExit(fatalException);
+      }
     }
     return hadListeners;
   };
@@ -650,13 +676,19 @@ exports.install = function(options) {
       options.emptyCacheBetweenOperations : false;
   }
 
+
   // Install the error reformatter
-  if (!sharedData.errorFormatterInstalled) {
-    sharedData.errorFormatterInstalled = true;
-    Error.prepareStackTrace = prepareStackTrace;
+  if (!sharedData.errorPrepareStackTraceHook) {
+    const originalValue = Error.prepareStackTrace;
+    sharedData.errorPrepareStackTraceHook = {
+      enabled: true,
+      originalValue,
+      installedValue: undefined
+    };
+    Error.prepareStackTrace = sharedData.errorPrepareStackTraceHook.installedValue = createPrepareStackTrace(sharedData.errorPrepareStackTraceHook);
   }
 
-  if (!sharedData.uncaughtShimInstalled) {
+  if (!sharedData.processEmitHook) {
     var installHandler = 'handleUncaughtExceptions' in options ?
       options.handleUncaughtExceptions : true;
 
@@ -679,11 +711,34 @@ exports.install = function(options) {
     // generated JavaScript code will be shown above the stack trace instead of
     // the original source code.
     if (installHandler && hasGlobalProcessEventEmitter()) {
-      sharedData.uncaughtShimInstalled = true;
       shimEmitUncaughtException();
     }
   }
 };
+
+exports.uninstall = function() {
+  if(sharedData.processEmitHook) {
+    // Disable behavior
+    sharedData.processEmitHook.enabled = false;
+    // If possible, remove our hook function.  May not be possible if subsequent third-party hooks have wrapped around us.
+    if(process.emit === sharedData.processEmitHook.installedValue) {
+      process.emit = sharedData.processEmitHook.originalValue;
+    }
+    sharedData.processEmitHook = undefined;
+  }
+  if(sharedData.errorPrepareStackTraceHook) {
+    // Disable behavior
+    sharedData.errorPrepareStackTraceHook.enabled = false;
+    // If possible or necessary, remove our hook function.
+    // In vanilla environments, prepareStackTrace is `undefined`.
+    // We cannot delegate to `undefined` the way we can to a function w/`.apply()`; our only option is to remove the function.
+    // If we are the *first* hook installed, and another was installed on top of us, we have no choice but to remove both.
+    if(Error.prepareStackTrace === sharedData.errorPrepareStackTraceHook.installedValue || typeof sharedData.errorPrepareStackTraceHook.originalValue !== 'function') {
+      Error.prepareStackTrace = sharedData.errorPrepareStackTraceHook.originalValue;
+    }
+    sharedData.errorPrepareStackTraceHook = undefined;
+  }
+}
 
 exports.resetRetrieveHandlers = function() {
   sharedData.retrieveFileHandlers.length = 0;
