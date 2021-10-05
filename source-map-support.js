@@ -651,21 +651,24 @@ exports.install = function(options) {
         onConflictingLibraryRedirectArr: []
       }
       Module._resolveFilename = sharedData.moduleResolveFilenameHook.installedValue = function (request, parent, isMain, options) {
-        // Match all source-map-support entrypoints: source-map-support, source-map-support/register
-        let requestRedirect;
-        if (request === 'source-map-support') {
-          requestRedirect = './';
-        } else if (request === 'source-map-support/register') {
-          requestRedirect = './register';
-        }
+        if (sharedData.moduleResolveFilenameHook && sharedData.moduleResolveFilenameHook.enabled) {
+          // Match all source-map-support entrypoints: source-map-support, source-map-support/register
+          let requestRedirect;
+          if (request === 'source-map-support') {
+            requestRedirect = './';
+          } else if (request === 'source-map-support/register') {
+            requestRedirect = './register';
+          }
 
-        if (requestRedirect !== undefined) {
-            const newRequest = require.resolve(requestRedirect);
-            for (const cb of sharedData.moduleResolveFilenameHook.onConflictingLibraryRedirectArr) {
-              cb(request, parent, isMain, options, newRequest);
-            }
-            request = newRequest;
+          if (requestRedirect !== undefined) {
+              const newRequest = require.resolve(requestRedirect);
+              for (const cb of sharedData.moduleResolveFilenameHook.onConflictingLibraryRedirectArr) {
+                cb(request, parent, isMain, options, newRequest);
+              }
+              request = newRequest;
+          }
         }
+        
         return originalValue.call(this, request, parent, isMain, options);
       }
     } 
