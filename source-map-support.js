@@ -77,8 +77,11 @@ var sharedData = initializeSharedData({
   errorPrepareStackTraceHook: undefined,
   /** @type {HookState} */
   processEmitHook: undefined,
-  /** @type {HookState & { onConflictingLibraryRedirectArr: Array<(request: string, parent: any, isMain: boolean, redirectedRequest: string) => void> }} */
+  /** @type {HookState} */
   moduleResolveFilenameHook: undefined,
+
+  /** @type {Array<(request: string, parent: any, isMain: boolean, redirectedRequest: string) => void>} */
+  onConflictingLibraryRedirectArr: [],
 
   // If true, the caches are reset before a stack trace formatting operation
   emptyCacheBetweenOperations: false,
@@ -644,14 +647,13 @@ exports.install = function(options) {
   if(redirectConflictingLibrary) {
     if (!sharedData.moduleResolveFilenameHook) {
       const originalValue = Module._resolveFilename;
-      sharedData.moduleResolveFilenameHook = {
+      const moduleResolveFilenameHook = sharedData.moduleResolveFilenameHook = {
         enabled: true,
         originalValue,
         installedValue: undefined,
-        onConflictingLibraryRedirectArr: []
       }
       Module._resolveFilename = sharedData.moduleResolveFilenameHook.installedValue = function (request, parent, isMain, options) {
-        if (sharedData.moduleResolveFilenameHook && sharedData.moduleResolveFilenameHook.enabled) {
+        if (moduleResolveFilenameHook.enabled) {
           // Match all source-map-support entrypoints: source-map-support, source-map-support/register
           let requestRedirect;
           if (request === 'source-map-support') {
@@ -662,7 +664,7 @@ exports.install = function(options) {
 
           if (requestRedirect !== undefined) {
               const newRequest = require.resolve(requestRedirect);
-              for (const cb of sharedData.moduleResolveFilenameHook.onConflictingLibraryRedirectArr) {
+              for (const cb of sharedData.onConflictingLibraryRedirectArr) {
                 cb(request, parent, isMain, options, newRequest);
               }
               request = newRequest;
@@ -673,7 +675,7 @@ exports.install = function(options) {
       }
     } 
     if (onConflictingLibraryRedirect) {
-      sharedData.moduleResolveFilenameHook.onConflictingLibraryRedirectArr.push(onConflictingLibraryRedirect);
+      sharedData.onConflictingLibraryRedirectArr.push(onConflictingLibraryRedirect);
     }
   }
 
@@ -790,6 +792,7 @@ exports.uninstall = function() {
     }
     sharedData.moduleResolveFilenameHook = undefined;
   }
+  sharedData.onConflictingLibraryRedirectArr.length = 0;
 }
 
 exports.resetRetrieveHandlers = function() {
