@@ -1,8 +1,10 @@
 // Note: some tests rely on side-effects from prior tests.
 // You may not get meaningful results running a subset of tests.
 
+const Module = require('module');
 const priorErrorPrepareStackTrace = Error.prepareStackTrace;
 const priorProcessEmit = process.emit;
+const priorResolveFilename = Module._resolveFilename;
 const underTest = require('./source-map-support');
 var SourceMapGenerator = require('source-map').SourceMapGenerator;
 var child_process = require('child_process');
@@ -704,16 +706,52 @@ it('supports multiple instances', function(done) {
   ]);
 });
 
+describe('redirects require() of "source-map-support" to this module', function() {
+  it('redirects', function() {
+    assert.strictEqual(require.resolve('source-map-support'), require.resolve('.'));
+    assert.strictEqual(require.resolve('source-map-support/register'), require.resolve('./register'));
+    assert.strictEqual(require('source-map-support'), require('.'));
+  });
+
+  it('emits notifications', function() {
+    let onConflictingLibraryRedirectCalls = [];
+    let onConflictingLibraryRedirectCalls2 = [];
+    underTest.install({
+      onConflictingLibraryRedirect(request, parent, isMain, redirectedRequest) {
+        onConflictingLibraryRedirectCalls.push([...arguments]);
+      }
+    });
+    underTest.install({
+      onConflictingLibraryRedirect(request, parent, isMain, redirectedRequest) {
+        onConflictingLibraryRedirectCalls2.push([...arguments]);
+      }
+    });
+    require.resolve('source-map-support');
+    assert.strictEqual(onConflictingLibraryRedirectCalls.length, 1);
+    assert.strictEqual(onConflictingLibraryRedirectCalls2.length, 1);
+    for(const args of [onConflictingLibraryRedirectCalls[0], onConflictingLibraryRedirectCalls2[0]]) {
+      const [request, parent, isMain, options, redirectedRequest] = args;
+      assert.strictEqual(request, 'source-map-support');
+      assert.strictEqual(parent, module);
+      assert.strictEqual(isMain, false);
+      assert.strictEqual(options, undefined);
+      assert.strictEqual(redirectedRequest, require.resolve('.'));
+    }
+  });
+});
+
 describe('uninstall', function() {
   this.beforeEach(function() {
     underTest.uninstall();
     process.emit = priorProcessEmit;
     Error.prepareStackTrace = priorErrorPrepareStackTrace;
+    Module._resolveFilename = priorResolveFilename;
   });
 
   it('uninstall removes hooks and source-mapping behavior', function() {
     assert.strictEqual(Error.prepareStackTrace, priorErrorPrepareStackTrace);
     assert.strictEqual(process.emit, priorProcessEmit);
+    assert.strictEqual(Module._resolveFilename, priorResolveFilename);
     normalThrowWithoutSourceMapSupportInstalled();
   });
 
@@ -771,6 +809,22 @@ describe('uninstall', function() {
     assert.strictEqual(process.emit, thirdPartyProcessEmit);
     normalThrowWithoutSourceMapSupportInstalled();
     process.emit('foo');
+    assert(peInvocations >= 1);
+  });
+
+  it('uninstall preserves third-party module._resolveFilename hooks installed after us', function() {
+    installSms();
+    const wrappedResolveFilename = Module._resolveFilename;
+    let peInvocations = 0;
+    function thirdPartyModuleResolveFilename() {
+      peInvocations++;
+      return wrappedResolveFilename.apply(this, arguments);
+    }
+    Module._resolveFilename = thirdPartyModuleResolveFilename;
+    underTest.uninstall();
+    assert.strictEqual(Module._resolveFilename, thirdPartyModuleResolveFilename);
+    normalThrowWithoutSourceMapSupportInstalled();
+    Module._resolveFilename('repl');
     assert(peInvocations >= 1);
   });
 });

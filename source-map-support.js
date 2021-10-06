@@ -77,6 +77,11 @@ var sharedData = initializeSharedData({
   errorPrepareStackTraceHook: undefined,
   /** @type {HookState} */
   processEmitHook: undefined,
+  /** @type {HookState} */
+  moduleResolveFilenameHook: undefined,
+
+  /** @type {Array<(request: string, parent: any, isMain: boolean, redirectedRequest: string) => void>} */
+  onConflictingLibraryRedirectArr: [],
 
   // If true, the caches are reset before a stack trace formatting operation
   emptyCacheBetweenOperations: false,
@@ -633,6 +638,47 @@ exports.install = function(options) {
     }
   }
 
+  // Use dynamicRequire to avoid including in browser bundles
+  var Module = dynamicRequire(module, 'module');
+
+  // Redirect subsequent imports of "source-map-support"
+  // to this package
+  const {redirectConflictingLibrary = true, onConflictingLibraryRedirect} = options;
+  if(redirectConflictingLibrary) {
+    if (!sharedData.moduleResolveFilenameHook) {
+      const originalValue = Module._resolveFilename;
+      const moduleResolveFilenameHook = sharedData.moduleResolveFilenameHook = {
+        enabled: true,
+        originalValue,
+        installedValue: undefined,
+      }
+      Module._resolveFilename = sharedData.moduleResolveFilenameHook.installedValue = function (request, parent, isMain, options) {
+        if (moduleResolveFilenameHook.enabled) {
+          // Match all source-map-support entrypoints: source-map-support, source-map-support/register
+          let requestRedirect;
+          if (request === 'source-map-support') {
+            requestRedirect = './';
+          } else if (request === 'source-map-support/register') {
+            requestRedirect = './register';
+          }
+
+          if (requestRedirect !== undefined) {
+              const newRequest = require.resolve(requestRedirect);
+              for (const cb of sharedData.onConflictingLibraryRedirectArr) {
+                cb(request, parent, isMain, options, newRequest);
+              }
+              request = newRequest;
+          }
+        }
+        
+        return originalValue.call(this, request, parent, isMain, options);
+      }
+    } 
+    if (onConflictingLibraryRedirect) {
+      sharedData.onConflictingLibraryRedirectArr.push(onConflictingLibraryRedirect);
+    }
+  }
+
   // Allow sources to be found by methods other than reading the files
   // directly from disk.
   if (options.retrieveFile) {
@@ -655,8 +701,6 @@ exports.install = function(options) {
 
   // Support runtime transpilers that include inline source maps
   if (options.hookRequire && !isInBrowser()) {
-    // Use dynamicRequire to avoid including in browser bundles
-    var Module = dynamicRequire(module, 'module');
     var $compile = Module.prototype._compile;
 
     if (!$compile.__sourceMapSupport) {
@@ -738,6 +782,17 @@ exports.uninstall = function() {
     }
     sharedData.errorPrepareStackTraceHook = undefined;
   }
+  if (sharedData.moduleResolveFilenameHook) {
+    // Disable behavior
+    sharedData.moduleResolveFilenameHook.enabled = false;
+    // If possible, remove our hook function.  May not be possible if subsequent third-party hooks have wrapped around us.
+    var Module = dynamicRequire(module, 'module');
+    if(Module._resolveFilename === sharedData.moduleResolveFilenameHook.installedValue) {
+      Module._resolveFilename = sharedData.moduleResolveFilenameHook.originalValue;
+    }
+    sharedData.moduleResolveFilenameHook = undefined;
+  }
+  sharedData.onConflictingLibraryRedirectArr.length = 0;
 }
 
 exports.resetRetrieveHandlers = function() {
