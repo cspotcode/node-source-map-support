@@ -35,6 +35,11 @@ function dynamicRequire(mod, request) {
 // Increment this if the format of sharedData changes in a breaking way.
 var sharedDataVersion = 1;
 
+/**
+ * @template T
+ * @param {T} defaults
+ * @returns {T}
+ */
 function initializeSharedData(defaults) {
   var sharedDataKey = 'source-map-support/sharedData';
   if (typeof Symbol !== 'undefined') {
@@ -80,7 +85,7 @@ var sharedData = initializeSharedData({
   /** @type {HookState} */
   moduleResolveFilenameHook: undefined,
 
-  /** @type {Array<(request: string, parent: any, isMain: boolean, redirectedRequest: string) => void>} */
+  /** @type {Array<(request: string, parent: any, isMain: boolean, options: any, redirectedRequest: string) => void>} */
   onConflictingLibraryRedirectArr: [],
 
   // If true, the caches are reset before a stack trace formatting operation
