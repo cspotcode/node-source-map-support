@@ -39,8 +39,9 @@ export interface Options {
      * Callback will be called every time we redirect due to `redirectConflictingLibrary`
      * This allows consumers to log helpful warnings if they choose.
      * @param parent NodeJS.Module which made the require() or require.resolve() call
+     * @param options options object internally passed to node's `_resolveFilename` hook
      */
-    onConflictingLibraryRedirect?: (request: string, parent: any, isMain: boolean, redirectedRequest: string) => void;
+    onConflictingLibraryRedirect?: (request: string, parent: any, isMain: boolean, options: any, redirectedRequest: string) => void;
 }
 
 export interface Position {
