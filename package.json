@@ -38,5 +38,9 @@
   "license": "MIT",
   "engines": {
     "node": ">=12"
+  },
+  "volta": {
+    "node": "16.11.0",
+    "npm": "7.24.2"
   }
 }
