@@ -643,13 +643,17 @@ exports.install = function(options) {
     }
   }
 
-  // Use dynamicRequire to avoid including in browser bundles
-  var Module = dynamicRequire(module, 'module');
+  var Module;
+
+  if (!isInBrowser()) {
+    // Use dynamicRequire to avoid including in browser bundles
+    Module = dynamicRequire(module, 'module');
+  }
 
   // Redirect subsequent imports of "source-map-support"
   // to this package
   const {redirectConflictingLibrary = true, onConflictingLibraryRedirect} = options;
-  if(redirectConflictingLibrary) {
+  if(redirectConflictingLibrary && !isInBrowser()) {
     if (!sharedData.moduleResolveFilenameHook) {
       const originalValue = Module._resolveFilename;
       const moduleResolveFilenameHook = sharedData.moduleResolveFilenameHook = {
@@ -675,10 +679,10 @@ exports.install = function(options) {
               request = newRequest;
           }
         }
-        
+
         return originalValue.call(this, request, parent, isMain, options);
       }
-    } 
+    }
     if (onConflictingLibraryRedirect) {
       sharedData.onConflictingLibraryRedirectArr.push(onConflictingLibraryRedirect);
     }
@@ -746,9 +750,11 @@ exports.install = function(options) {
     // rather than printing something to stderr and exiting.
     try {
       // We need to use `dynamicRequire` because `require` on it's own will be optimized by WebPack/Browserify.
-      var worker_threads = dynamicRequire(module, 'worker_threads');
-      if (worker_threads.isMainThread === false) {
-        installHandler = false;
+      if (!isInBrowser()) {
+        var worker_threads = dynamicRequire(module, 'worker_threads');
+        if (worker_threads.isMainThread === false) {
+          installHandler = false;
+        }
       }
     } catch(e) {}
 
@@ -791,9 +797,11 @@ exports.uninstall = function() {
     // Disable behavior
     sharedData.moduleResolveFilenameHook.enabled = false;
     // If possible, remove our hook function.  May not be possible if subsequent third-party hooks have wrapped around us.
-    var Module = dynamicRequire(module, 'module');
-    if(Module._resolveFilename === sharedData.moduleResolveFilenameHook.installedValue) {
-      Module._resolveFilename = sharedData.moduleResolveFilenameHook.originalValue;
+    if (!isInBrowser()) {
+      var Module = dynamicRequire(module, 'module');
+      if(Module._resolveFilename === sharedData.moduleResolveFilenameHook.installedValue) {
+        Module._resolveFilename = sharedData.moduleResolveFilenameHook.originalValue;
+      }
     }
     sharedData.moduleResolveFilenameHook = undefined;
   }

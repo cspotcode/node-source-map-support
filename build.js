@@ -39,13 +39,14 @@ run(browserify + ' .temp.js', function(error, stdout) {
     output_format: 'text',
     js_code: code
   }));
-  run('curl -d @.temp.js "https://closure-compiler.appspot.com/compile"', function(error, stdout) {
-    if (error) throw error;
-    var code = header + '\n' + stdout;
+  // run('curl -d @.temp.js "https://closure-compiler.appspot.com/compile"', function(error, stdout) {
+    // if (error) throw error;
+    // var code = header + '\n' + stdout;
+    code = header + '\n' + code;
     fs.unlinkSync('.temp.js');
     fs.writeFileSync('browser-source-map-support.js', code);
     fs.writeFileSync('amd-test/browser-source-map-support.js', code);
-  });
+  // });
 });
 
 // Build the AMD test

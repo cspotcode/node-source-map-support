@@ -21,7 +21,8 @@
     "@cspotcode/source-map-consumer": "0.8.0"
   },
   "devDependencies": {
-    "browserify": "^4.2.3",
+    "acorn": "^8.5.0",
+    "browserify": "^17.0.0",
     "coffeescript": "^1.12.7",
     "http-server": "^0.11.1",
     "mocha": "^3.5.3",
