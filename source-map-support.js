@@ -1,4 +1,4 @@
-var SourceMapConsumer = require('@cspotcode/source-map-consumer').SourceMapConsumer;
+const { TraceMap, originalPositionFor, AnyMap } = require('@jridgewell/trace-mapping');
 var path = require('path');
 var util = require('util');
 
@@ -95,6 +95,7 @@ var sharedData = initializeSharedData({
   fileContentsCache: {},
 
   // Maps a file path to a source map for that file
+  /** @type {Record<string, {url: string, map: TraceMap}} */
   sourceMapCache: {},
 
   // Priority list of retrieve handlers
@@ -234,6 +235,7 @@ function retrieveSourceMapURL(source) {
 // there is no source map.  The map field may be either a string or the parsed
 // JSON object (ie, it must be a valid argument to the SourceMapConsumer
 // constructor).
+/** @type {(source: string) => import('./source-map-support').UrlAndMap | null} */
 var retrieveSourceMap = handlerExec(sharedData.retrieveMapHandlers, sharedData.internalRetrieveMapHandlers);
 sharedData.internalRetrieveMapHandlers.push(function(source) {
   var sourceMappingURL = retrieveSourceMapURL(source);
@@ -270,7 +272,7 @@ function mapSourcePosition(position) {
     if (urlAndMap) {
       sourceMap = sharedData.sourceMapCache[position.source] = {
         url: urlAndMap.url,
-        map: new SourceMapConsumer(urlAndMap.map)
+        map: new AnyMap(urlAndMap.map, urlAndMap.url)
       };
 
       // Load all sources stored inline with the source map into the file cache
@@ -293,8 +295,8 @@ function mapSourcePosition(position) {
   }
 
   // Resolve the source URL relative to the URL of the source map
-  if (sourceMap && sourceMap.map && typeof sourceMap.map.originalPositionFor === 'function') {
-    var originalPosition = sourceMap.map.originalPositionFor(position);
+  if (sourceMap && sourceMap.map) {
+    var originalPosition = originalPositionFor(sourceMap.map, position);
 
     // Only return the original position if a matching line was found. If no
     // matching line is found then we return position instead, which will cause
