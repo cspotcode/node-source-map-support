@@ -1,4 +1,5 @@
 const { TraceMap, originalPositionFor, AnyMap } = require('@jridgewell/trace-mapping');
+const resolveUri = require('@jridgewell/resolve-uri');
 var path = require('path');
 const { fileURLToPath } = require('url');
 var util = require('util');
@@ -187,23 +188,7 @@ sharedData.internalRetrieveFileHandlers.push(function(path) {
 // Support URLs relative to a directory, but be careful about a protocol prefix
 // in case we are in the browser (i.e. directories may start with "http://" or "file:///")
 function supportRelativeURL(file, url) {
-  if (!file) return url;
-  let targetPath = url;
-  try {
-    const urlParsed = new URL(url);
-    if(urlParsed.protocol !== 'file:') return url;
-    targetPath = fileURLToPath(urlParsed);
-  } catch(e) {}
-  var dir = path.dirname(file);
-  var match = /^\w+:\/\/[^\/]*/.exec(dir);
-  var protocol = match ? match[0] : '';
-  var startPath = dir.slice(protocol.length);
-  if (protocol && /^\/\w\:/.test(startPath)) {
-    // handle file:///C:/ paths
-    protocol += '/';
-    return protocol + path.resolve(dir.slice(protocol.length), targetPath).replace(/\\/g, '/');
-  }
-  return protocol + path.resolve(dir.slice(protocol.length), targetPath);
+  return resolveUri(url, file);
 }
 
 function retrieveSourceMapURL(source) {
