@@ -14,6 +14,36 @@ var fs = require('fs');
 var util = require('util');
 var bufferFrom = Buffer.from;
 
+function re(...args) {
+  return new RegExp(String.raw(...args));
+}
+
+function exportDecl(extension) {
+  return extension === 'mjs' ? 'export const test' : 'exports.test';
+}
+
+// Assign each test a unique ID, to be used in filenames.
+// Eliminates need for cache invalidation, because node ESM has no way to
+// invalidate cache.
+let id = 0;
+beforeEach(function() {
+  id++;
+});
+// Consolidate cleanup into a hook so that failed assertions do not leave files
+// on disk.
+afterEach(function() {
+  for(const name of [`generated`, `original`]) {
+    for(const suffix of [``, `-separate`, `-inline`]) {
+      for(const ext of [`js`, `cjs`, `mjs`]) {
+        for(const ext2 of [``, `.map`]) {
+          const file = `.${name}-${id}${suffix}.${ext}${ext2}`;
+          fs.existsSync(file) && fs.unlinkSync(file);
+        }
+      }
+    }
+  }
+});
+
 function compareLines(actual, expected) {
   assert(actual.length >= expected.length, 'got ' + actual.length + ' lines but expected at least ' + expected.length + ' lines\n' + util.inspect({actual, expected}));
   for (var i = 0; i < expected.length; i++) {
@@ -35,45 +65,45 @@ function getSourceMapCreators() {
     createMultiLineSourceMap,
     createMultiLineSourceMapWithSourcesContent
   };
-function createEmptySourceMap() {
+function createEmptySourceMap(id, extension) {
   return new SourceMapGenerator({
-    file: '.generated.js',
+    file: `.generated-${id}.${extension}`,
     sourceRoot: '.'
   });
 }
 
-function createSourceMapWithGap() {
-  var sourceMap = createEmptySourceMap();
+function createSourceMapWithGap(id, extension) {
+  var sourceMap = createEmptySourceMap(id, extension);
   sourceMap.addMapping({
     generated: { line: 100, column: 0 },
     original: { line: 100, column: 0 },
-    source: '.original.js'
+    source: `.original-${id}.js`
   });
   return sourceMap;
 }
 
-function createSingleLineSourceMap() {
-  var sourceMap = createEmptySourceMap();
+function createSingleLineSourceMap(id, extension) {
+  var sourceMap = createEmptySourceMap(id, extension);
   sourceMap.addMapping({
     generated: { line: 1, column: 0 },
     original: { line: 1, column: 0 },
-    source: '.original.js'
+    source: `.original-${id}.js`
   });
   return sourceMap;
 }
 
-function createSecondLineSourceMap() {
-  var sourceMap = createEmptySourceMap();
+function createSecondLineSourceMap(id, extension) {
+  var sourceMap = createEmptySourceMap(id, extension);
   sourceMap.addMapping({
     generated: { line: 2, column: 0 },
     original: { line: 1, column: 0 },
-    source: '.original.js'
+    source: `.original-${id}.js`
   });
   return sourceMap;
 }
 
-function createMultiLineSourceMap() {
-  var sourceMap = createEmptySourceMap();
+function createMultiLineSourceMap(id, extension) {
+  var sourceMap = createEmptySourceMap(id, extension);
   for (var i = 1; i <= 100; i++) {
     sourceMap.addMapping({
       generated: { line: i, column: 0 },
@@ -84,56 +114,66 @@ function createMultiLineSourceMap() {
   return sourceMap;
 }
 
-function createMultiLineSourceMapWithSourcesContent() {
-  var sourceMap = createEmptySourceMap();
+function createMultiLineSourceMapWithSourcesContent(id, extension) {
+  var sourceMap = createEmptySourceMap(id, extension);
   var original = new Array(1001).join('\n');
   for (var i = 1; i <= 100; i++) {
     sourceMap.addMapping({
       generated: { line: i, column: 0 },
       original: { line: 1000 + i, column: 4 },
-      source: 'original.js'
+      source: `original-${id}.js`
     });
     original += '    line ' + i + '\n';
   }
-  sourceMap.setSourceContent('original.js', original);
+  sourceMap.setSourceContent(`original-${id}.js`, original);
   return sourceMap;
 }
 }
 
+function rewriteExpectation(expected, generatedFilenameIn, generatedFilenameOut) {
+  return expected.map(v => {
+    if(v instanceof RegExp) return new RegExp(v.source.replace(generatedFilenameIn, generatedFilenameOut));
+    return v.replace(generatedFilenameIn, generatedFilenameOut);
+  });
+}
+function getSrcPrefix(extension) {
+  return extension === 'mjs' ? `import {createRequire} from 'module';const require = createRequire(import.meta.url);` : '';
+}
 async function compareStackTrace(id, extension, sourceMap, source, expected) {
+  const srcPrefix = getSrcPrefix(extension);
   // Check once with a separate source map
-  fs.writeFileSync(`.generated.${id}.${extension}.map`, sourceMap.toString());
-  fs.writeFileSync(`.generated.${id}.${extension}`, 'exports.test = function() {' +
-    source.join('\n') + `};//@ sourceMappingURL=.generated.${id}.${extension}.map`);
+  fs.writeFileSync(`.generated-${id}-separate.${extension}.map`, sourceMap.toString());
+  fs.writeFileSync(`.generated-${id}-separate.${extension}`, `${srcPrefix}${exportDecl(extension)} = function() {` +
+    source.join('\n') + `};//@ sourceMappingURL=.generated-${id}-separate.${extension}.map`);
   try {
-    // delete require.cache[require.resolve('./.generated')];
-    await import(`./.generated.${id}.${extension}`).test();
+    // delete require.cache[require.resolve(`./.generated-${id}`)];
+    (await import(`./.generated-${id}-separate.${extension}`)).test();
   } catch (e) {
     console.log(e);
-    compareLines(e.stack.split(/\r\n|\n/), expected);
+    compareLines(e.stack.split(/\r\n|\n/), rewriteExpectation(expected, `.generated-${id}`, `.generated-${id}-separate`));
   }
-  fs.unlinkSync('.generated.${extension}');
-  fs.unlinkSync('.generated.${extension}.map');
+  fs.unlinkSync(`.generated-${id}-separate.${extension}`);
+  fs.unlinkSync(`.generated-${id}-separate.${extension}.map`);
 
   // Check again with an inline source map (in a data URL)
-  fs.writeFileSync('.generated.${extension}', 'exports.test = function() {' +
+  fs.writeFileSync(`.generated-${id}-inline.${extension}`, `${srcPrefix}${exportDecl(extension)} = function() {` +
     source.join('\n') + '};//@ sourceMappingURL=data:application/json;base64,' +
     bufferFrom(sourceMap.toString()).toString('base64'));
   try {
-    delete require.cache[require.resolve('./.generated')];
-    require('./.generated').test();
+    (await import (`./.generated-${id}-inline.${extension}`)).test();
   } catch (e) {
-    compareLines(e.stack.split(/\r\n|\n/), expected);
+    compareLines(e.stack.split(/\r\n|\n/), rewriteExpectation(expected, `.generated-${id}`, `.generated-${id}-inline`));
   }
-  fs.unlinkSync('.generated.${extension}');
+  fs.unlinkSync(`.generated-${id}-inline.${extension}`);
 }
 
 function compareStdout(done, id, extension, sourceMap, source, expected) {
-  fs.writeFileSync(`.original.${id}.${extension}`, 'this is the original code');
-  fs.writeFileSync(`.generated.${id}.${extension}.map`, sourceMap.toString());
-  fs.writeFileSync(`.generated.${id}.${extension}`, source.join('\n') +
-    '//@ sourceMappingURL=.generated.js.map');
-  child_process.exec('node ./.generated', function(error, stdout, stderr) {
+  let srcPrefix = getSrcPrefix(extension);
+  fs.writeFileSync(`.original-${id}.js`, 'this is the original code');
+  fs.writeFileSync(`.generated-${id}.${extension}.map`, sourceMap.toString());
+  fs.writeFileSync(`.generated-${id}.${extension}`, srcPrefix + source.join('\n') +
+    `//@ sourceMappingURL=.generated-${id}.${extension}.map`);
+  child_process.exec(`node ./.generated-${id}.${extension}`, function(error, stdout, stderr) {
     try {
       compareLines(
         (stdout + stderr)
@@ -145,9 +185,9 @@ function compareStdout(done, id, extension, sourceMap, source, expected) {
     } catch (e) {
       return done(e);
     }
-    fs.unlinkSync(`.generated.${id}.js`);
-    fs.unlinkSync(`.generated.${id}.js.map`);
-    fs.unlinkSync(`.original.${id}.js`);
+    fs.unlinkSync(`.generated-${id}.${extension}`);
+    fs.unlinkSync(`.generated-${id}.${extension}.map`);
+    fs.unlinkSync(`.original-${id}.js`);
     done();
   });
 }
@@ -160,20 +200,20 @@ function installSms() {
 
 function getTestMacros(sourceMapConstructors) {
   return {normalThrow, normalThrowWithoutSourceMapSupportInstalled};
-async function normalThrow() {
-  await compareStackTrace(sourceMapConstructors.createMultiLineSourceMap(), [
+async function normalThrow(id, extension = 'js') {
+  await compareStackTrace(id, extension, sourceMapConstructors.createMultiLineSourceMap(id, extension), [
     'throw new Error("test");'
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 }
-async function normalThrowWithoutSourceMapSupportInstalled() {
-  await compareStackTrace(sourceMapConstructors.createMultiLineSourceMap(), [
+async function normalThrowWithoutSourceMapSupportInstalled(id, extension = 'cjs') {
+  await compareStackTrace(id, extension, sourceMapConstructors.createMultiLineSourceMap(id, extension), [
     'throw new Error("test");'
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?\.generated\.js:1:34\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?\.generated-${id}\.${extension}:1:34\)$`
   ]);
 }
 }
@@ -181,8 +221,11 @@ async function normalThrowWithoutSourceMapSupportInstalled() {
 describe('Without source-map-support installed', function() {
   const sourceMapConstructors = getSourceMapCreators();
   const macros = getTestMacros(sourceMapConstructors);
+  const {normalThrowWithoutSourceMapSupportInstalled} = macros;
 
-  it('normal throw without source-map-support installed', macros.normalThrowWithoutSourceMapSupportInstalled);
+  it('normal throw without source-map-support installed', async function () {
+    await normalThrowWithoutSourceMapSupportInstalled(id);
+  });
 });
 
 function identity(v) {return v}
@@ -205,25 +248,29 @@ function addPrefixToSourceMapPaths(sourceMap, prefix) {
   return sourceMap;
 }
 
-// describe('sourcemap style: relative paths sans ./ prefix, e.g. "original.js"', () => {
-//   declareTests(identity);
-// });
-// describe('sourcemap style: relative paths with ./ prefix, e.g. "./original.js"', () => {
-//   declareTests(addRelativePrefixToSourceMapPaths);
-// });
-describe('sourcemap style: absolute paths and sourceRoot removed, e.g. "/abs/path/original.js"', () => {
-  describe('cjs', () => {
-    declareTests(addAbsolutePrefixToSourceMapPaths, 'cjs');
-  });
-  describe('mjs', () => {
-    declareTests(addAbsolutePrefixToSourceMapPaths, 'mjs');
-  });
+describe('sourcemap style: relative paths sans ./ prefix, e.g. "original-1.js" >', () => {
+  moduleTypeSuites(identity);
 });
-// describe('sourcemap style: file urls with absolute paths and sourceRoot removed, e.g. "file:///abs/path/original.js"', () => {
-//   declareTests(addFileUrlAbsolutePrefixToSourceMapPaths);
-// });
+describe('sourcemap style: relative paths with ./ prefix, e.g. "./original-1.js" >', () => {
+  moduleTypeSuites(addRelativePrefixToSourceMapPaths);
+});
+describe('sourcemap style: absolute paths and sourceRoot removed, e.g. "/abs/path/original-1.js" >', () => {
+  moduleTypeSuites(addAbsolutePrefixToSourceMapPaths);
+});
+describe('sourcemap style: file urls with absolute paths and sourceRoot removed, e.g. "file:///abs/path/original-1.js" >', () => {
+  moduleTypeSuites(addFileUrlAbsolutePrefixToSourceMapPaths);
+});
 
-function declareTests(sourceMapPostprocessor, fileExtension) {
+function moduleTypeSuites(sourceMapPostprocessor) {
+  describe('cjs >', () => {
+    tests(sourceMapPostprocessor, 'cjs');
+  });
+  describe('mjs >', () => {
+    tests(sourceMapPostprocessor, 'mjs');
+  });
+}
+
+function tests(sourceMapPostprocessor, extension) {
   const sourceMapConstructors = getSourceMapCreators();
   for(const [key, value] of Object.entries(sourceMapConstructors)) {
     sourceMapConstructors[key] = (...args) => sourceMapPostprocessor(value(...args));
@@ -232,14 +279,14 @@ function declareTests(sourceMapPostprocessor, fileExtension) {
   const {normalThrow} = getTestMacros(sourceMapConstructors);
 it('normal throw', async function() {
   installSms();
-  normalThrow();
+  await normalThrow(id, extension);
 });
 
 /* The following test duplicates some of the code in
  * `normal throw` but triggers file read failure.
  */
 it('fs.readFileSync failure', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'var fs = require("fs");',
     'var rfs = fs.readFileSync;',
     'fs.readFileSync = function() {',
@@ -252,13 +299,13 @@ it('fs.readFileSync failure', async function() {
     '}'
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?line7\.js:1007:107\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line7\.js:1007:107\)$`
   ]);
 });
 
 
 it('throw inside function', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'function foo() {',
     '  throw new Error("test");',
     '}',
@@ -266,12 +313,12 @@ it('throw inside function', async function() {
   ], [
     'Error: test',
     /^    at foo \((?:.*[/\\])?line2\.js:1002:102\)$/,
-    /^    at Object\.exports\.test \((?:.*[/\\])?line4\.js:1004:104\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line4\.js:1004:104\)$`
   ]);
 });
 
 it('throw inside function inside function', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'function foo() {',
     '  function bar() {',
     '    throw new Error("test");',
@@ -283,36 +330,36 @@ it('throw inside function inside function', async function() {
     'Error: test',
     /^    at bar \((?:.*[/\\])?line3\.js:1003:103\)$/,
     /^    at foo \((?:.*[/\\])?line5\.js:1005:105\)$/,
-    /^    at Object\.exports\.test \((?:.*[/\\])?line7\.js:1007:107\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line7\.js:1007:107\)$`
   ]);
 });
 
 it('eval', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'eval("throw new Error(\'test\')");'
   ], [
     'Error: test',
 
     // Before Node 4, `Object.eval`, after just `eval`.
-    /^    at (?:Object\.)?eval \(eval at (<anonymous>|exports.test) \((?:.*[/\\])?line1\.js:1001:101\)/,
+    /^    at (?:Object\.)?eval \(eval at (<anonymous>|exports\.test|test) \((?:.*[/\\])?line1\.js:1001:101\)/,
 
-    /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 });
 
 it('eval inside eval', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'eval("eval(\'throw new Error(\\"test\\")\')");'
   ], [
     'Error: test',
     /^    at (?:Object\.)?eval \(eval at (<anonymous>|exports.test) \(eval at (<anonymous>|exports.test) \((?:.*[/\\])?line1\.js:1001:101\)/,
     /^    at (?:Object\.)?eval \(eval at (<anonymous>|exports.test) \((?:.*[/\\])?line1\.js:1001:101\)/,
-    /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 });
 
 it('eval inside function', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'function foo() {',
     '  eval("throw new Error(\'test\')");',
     '}',
@@ -321,43 +368,43 @@ it('eval inside function', async function() {
     'Error: test',
     /^    at eval \(eval at foo \((?:.*[/\\])?line2\.js:1002:102\)/,
     /^    at foo \((?:.*[/\\])?line2\.js:1002:102\)/,
-    /^    at Object\.exports\.test \((?:.*[/\\])?line4\.js:1004:104\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line4\.js:1004:104\)$`
   ]);
 });
 
 it('eval with sourceURL', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'eval("throw new Error(\'test\')//@ sourceURL=sourceURL.js");'
   ], [
     'Error: test',
     /^    at (?:Object\.)?eval \(sourceURL\.js:1:7\)$/,
-    /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 });
 
 it('eval with sourceURL inside eval', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'eval("eval(\'throw new Error(\\"test\\")//@ sourceURL=sourceURL.js\')");'
   ], [
     'Error: test',
     /^    at (?:Object\.)?eval \(sourceURL\.js:1:7\)$/,
     /^    at (?:Object\.)?eval \(eval at (<anonymous>|exports.test) \((?:.*[/\\])?line1\.js:1001:101\)/,
-    /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 });
 
 it('native function', async function() {
-  await compareStackTrace(createSingleLineSourceMap(), [
+  await compareStackTrace(id, extension, createSingleLineSourceMap(id, extension), [
     '[1].map(function(x) { throw new Error(x); });'
   ], [
     'Error: 1',
-    /[/\\].original\.js/,
+    re`[/\\].original-${id}.js`,
     /at Array\.map \((native|<anonymous>)\)/
   ]);
 });
 
 it('function constructor', async function() {
-  await compareStackTrace(createMultiLineSourceMap(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMap(id, extension), [
     'throw new Function(")");'
   ], [
     /SyntaxError: Unexpected token '?\)'?/,
@@ -365,121 +412,121 @@ it('function constructor', async function() {
 });
 
 it('throw with empty source map', async function() {
-  await compareStackTrace(createEmptySourceMap(), [
+  await compareStackTrace(id, extension, createEmptySourceMap(id, extension), [
     'throw new Error("test");'
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?\.generated.js:1:34\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?\.generated-${id}.${extension}:1:34\)$`
   ]);
 });
 
 it('throw in Timeout with empty source map', function(done) {
-  compareStdout(done, createEmptySourceMap(), [
+  compareStdout(done, id, extension, createEmptySourceMap(id, extension), [
     'require("./source-map-support").install();',
     'setTimeout(function () {',
     '    throw new Error("this is the error")',
     '})'
   ], [
-    /[/\\].generated.js:3$/,
+    re`[/\\].generated-${id}.${extension}:3$`,
     '    throw new Error("this is the error")',
     /^          \^$/,
     'Error: this is the error',
-    /^    at ((null)|(Timeout))\._onTimeout \((?:.*[/\\])?.generated\.js:3:11\)$/
+    re`^    at ((null)|(Timeout))\._onTimeout \((?:.*[/\\])?.generated-${id}\.${extension}:3:11\)$`
   ]);
 });
 
 it('throw with source map with gap', async function() {
-  await compareStackTrace(createSourceMapWithGap(), [
+  await compareStackTrace(id, extension, createSourceMapWithGap(id, extension), [
     'throw new Error("test");'
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?\.generated\.js:1:34\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?\.generated-${id}\.${extension}:1:34\)$`
   ]);
 });
 
 it('sourcesContent with data URL', async function() {
-  await compareStackTrace(createMultiLineSourceMapWithSourcesContent(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMapWithSourcesContent(id, extension), [
     'throw new Error("test");'
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?original\.js:1001:5\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?original-${id}\.js:1001:5\)$`
   ]);
 });
 
 it('finds the last sourceMappingURL', async function() {
-  await compareStackTrace(createMultiLineSourceMapWithSourcesContent(), [
+  await compareStackTrace(id, extension, createMultiLineSourceMapWithSourcesContent(id, extension), [
     '//# sourceMappingURL=missing.map.js',  // NB: compareStackTrace adds another source mapping.
     'throw new Error("test");'
   ], [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?original\.js:1002:5\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?original-${id}\.js:1002:5\)$`
   ]);
 });
 
 it('maps original name from source', async function() {
-  var sourceMap = createEmptySourceMap();
+  var sourceMap = createEmptySourceMap(id, extension);
   sourceMap.addMapping({
     generated: { line: 2, column: 8 },
     original: { line: 1000, column: 10 },
-    source: '.original.js',
+    source: `.original-${id}.js`,
   });
   sourceMap.addMapping({
     generated: { line: 4, column: 0 },
     original: { line: 1002, column: 1 },
-    source: ".original.js",
+    source: `.original-${id}.js`,
     name: "myOriginalName"
   });
-  await compareStackTrace(sourceMap, [
+  await compareStackTrace(id, extension, sourceMap, [
     'function foo() {',
     '  throw new Error("test");',
     '}',
     'foo();'
   ], [
     'Error: test',
-    /^    at myOriginalName \((?:.*[/\\])?\.original.js:1000:11\)$/,
-    /^    at Object\.exports\.test \((?:.*[/\\])?\.original.js:1002:2\)$/
+    re`^    at myOriginalName \((?:.*[/\\])?\.original-${id}.js:1000:11\)$`,
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?\.original-${id}.js:1002:2\)$`
   ]);
 });
 
 it('default options', function(done) {
-  compareStdout(done, createSecondLineSourceMap(), [
+  compareStdout(done, id, extension, createSecondLineSourceMap(id, extension), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
     'process.nextTick(foo);',
     'process.nextTick(function() { process.exit(1); });'
   ], [
-    /[/\\].original\.js:1$/,
+    re`[/\\].original-${id}\.js:1$`,
     'this is the original code',
     '^',
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?\.original\.js:1:1\)$/
+    re`^    at foo \((?:.*[/\\])?\.original-${id}\.js:1:1\)$`
   ]);
 });
 
 it('handleUncaughtExceptions is true', function(done) {
-  compareStdout(done, createSecondLineSourceMap(), [
+  compareStdout(done, id, extension, createSecondLineSourceMap(id, extension), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install({ handleUncaughtExceptions: true });',
     'process.nextTick(foo);'
   ], [
-    /[/\\].original\.js:1$/,
+    re`[/\\].original-${id}\.js:1$`,
     'this is the original code',
     '^',
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?\.original\.js:1:1\)$/
+    re`^    at foo \((?:.*[/\\])?\.original-${id}\.js:1:1\)$`
   ]);
 });
 
 it('handleUncaughtExceptions is false', function(done) {
-  compareStdout(done, createSecondLineSourceMap(), [
+  compareStdout(done, id, extension, createSecondLineSourceMap(id, extension), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install({ handleUncaughtExceptions: false });',
     'process.nextTick(foo);'
   ], [
-    /[/\\].generated.js:2$/,
+    re`[/\\].generated-${id}.${extension}:2$`,
     'function foo() { throw new Error("this is the error"); }',
 
     // Before Node 4, the arrow points on the `new`, after on the
@@ -487,42 +534,42 @@ it('handleUncaughtExceptions is false', function(done) {
     /^                 (?:      )?\^$/,
 
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?.original\.js:1:1\)$/
+    re`^    at foo \((?:.*[/\\])?.original-${id}\.js:1:1\)$`
   ]);
 });
 
 it('default options with empty source map', function(done) {
-  compareStdout(done, createEmptySourceMap(), [
+  compareStdout(done, id, extension, createEmptySourceMap(id, extension), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
     'process.nextTick(foo);'
   ], [
-    /[/\\].generated.js:2$/,
+    re`[/\\].generated-${id}.${extension}:2$`,
     'function foo() { throw new Error("this is the error"); }',
     /^                 (?:      )?\^$/,
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?.generated.js:2:24\)$/
+    re`^    at foo \((?:.*[/\\])?.generated-${id}.${extension}:2:24\)$`
   ]);
 });
 
 it('default options with source map with gap', function(done) {
-  compareStdout(done, createSourceMapWithGap(), [
+  compareStdout(done, id, extension, createSourceMapWithGap(id, extension), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
     'process.nextTick(foo);'
   ], [
-    /[/\\].generated.js:2$/,
+    re`[/\\].generated-${id}.${extension}:2$`,
     'function foo() { throw new Error("this is the error"); }',
     /^                 (?:      )?\^$/,
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?.generated.js:2:24\)$/
+    re`^    at foo \((?:.*[/\\])?.generated-${id}.${extension}:2:24\)$`
   ]);
 });
 
 it('specifically requested error source', function(done) {
-  compareStdout(done, createSecondLineSourceMap(), [
+  compareStdout(done, id, extension, createSecondLineSourceMap(id, extension), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'var sms = require("./source-map-support");',
@@ -530,30 +577,30 @@ it('specifically requested error source', function(done) {
     'process.on("uncaughtException", function (e) { console.log("SRC:" + sms.getErrorSource(e)); });',
     'process.nextTick(foo);'
   ], [
-    /^SRC:.*[/\\]\.original\.js:1$/,
+    re`^SRC:.*[/\\]\.original-${id}\.js:1$`,
     'this is the original code',
     '^'
   ]);
 });
 
 it('sourcesContent', function(done) {
-  compareStdout(done, createMultiLineSourceMapWithSourcesContent(), [
+  compareStdout(done, id, extension, createMultiLineSourceMapWithSourcesContent(id, extension), [
     '',
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
     'process.nextTick(foo);',
     'process.nextTick(function() { process.exit(1); });'
   ], [
-    /[/\\]original\.js:1002$/,
+    re`[/\\]original-${id}\.js:1002$`,
     '    line 2',
     '    ^',
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?original\.js:1002:5\)$/
+    re`^    at foo \((?:.*[/\\])?original-${id}\.js:1002:5\)$`
   ]);
 });
 
 it('missing source maps should also be cached', function(done) {
-  compareStdout(done, createSingleLineSourceMap(), [
+  compareStdout(done, id, extension, createSingleLineSourceMap(id, extension), [
     '',
     'var count = 0;',
     'function foo() {',
@@ -562,7 +609,7 @@ it('missing source maps should also be cached', function(done) {
     'require("./source-map-support").install({',
     '  overrideRetrieveSourceMap: true,',
     '  retrieveSourceMap: function(name) {',
-    '    if (/\\.generated.js$/.test(name)) count++;',
+    '    if (/\\.generated-\\d+\\.(js|cjs|mjs)$/.test(name)) count++;',
     '    return null;',
     '  }',
     '});',
@@ -571,15 +618,15 @@ it('missing source maps should also be cached', function(done) {
     'process.nextTick(function() { console.log(count); });',
   ], [
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?.generated.js:4:15\)$/,
+    re`^    at foo \((?:.*[/\\])?.generated-${id}.${extension}:4:15\)$`,
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?.generated.js:4:15\)$/,
+    re`^    at foo \((?:.*[/\\])?.generated-${id}.${extension}:4:15\)$`,
     '1', // The retrieval should only be attempted once
   ]);
 });
 
 it('should consult all retrieve source map providers', function(done) {
-  compareStdout(done, createSingleLineSourceMap(), [
+  compareStdout(done, id, extension, createSingleLineSourceMap(id, extension), [
     '',
     'var count = 0;',
     'function foo() {',
@@ -587,15 +634,15 @@ it('should consult all retrieve source map providers', function(done) {
     '}',
     'require("./source-map-support").install({',
     '  retrieveSourceMap: function(name) {',
-    '    if (/\\.generated.js$/.test(name)) count++;',
+    `    if (/\\.generated-${id}\\.${extension}$/.test(name)) count++;`,
     '    return undefined;',
     '  }',
     '});',
     'require("./source-map-support").install({',
     '  retrieveSourceMap: function(name) {',
-    '    if (/\\.generated.js$/.test(name)) {',
+    `    if (/\\.generated-${id}\\.${extension}$/.test(name)) {`,
     '      count++;',
-    '      return ' + JSON.stringify({url: '.original.js', map: createMultiLineSourceMapWithSourcesContent().toJSON()}) + ';',
+    '      return ' + JSON.stringify({url: `.original-${id}.js`, map: createMultiLineSourceMapWithSourcesContent(id, extension).toJSON()}) + ';',
     '    }',
     '  }',
     '});',
@@ -604,22 +651,22 @@ it('should consult all retrieve source map providers', function(done) {
     'process.nextTick(function() { console.log(count); });',
   ], [
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?original\.js:1004:5\)$/,
+    re`^    at foo \((?:.*[/\\])?original-${id}\.js:1004:5\)$`,
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?original\.js:1004:5\)$/,
+    re`^    at foo \((?:.*[/\\])?original-${id}\.js:1004:5\)$`,
     '1', // The retrieval should only be attempted once
   ]);
 });
 
 it('should allow for runtime inline source maps', function(done) {
-  var sourceMap = createMultiLineSourceMapWithSourcesContent();
+  var sourceMap = createMultiLineSourceMapWithSourcesContent(id, extension);
 
   fs.writeFileSync('.generated.jss', 'foo');
 
   compareStdout(function(err) {
     fs.unlinkSync('.generated.jss');
     done(err);
-  }, createSingleLineSourceMap(), [
+  }, id, extension, createSingleLineSourceMap(id, extension), [
     'require("./source-map-support").install({',
     '  hookRequire: true',
     '});',
@@ -641,40 +688,41 @@ it('should allow for runtime inline source maps', function(done) {
     'require("./.generated.jss");',
   ], [
     'Error: this is the error',
-    /^    at foo \(.*[/\\]original\.js:1004:5\)$/,
+    re`^    at foo \(.*[/\\]original-${id}\.js:1004:5\)$`,
     'Error: this is the error',
-    /^    at foo \(.*[/\\]original\.js:1004:5\)$/,
+    re`^    at foo \(.*[/\\]original-${id}\.js:1004:5\)$`,
     '0', // The retrieval should only be attempted once
   ]);
 });
 }
 
+// TODO should this suite also be inside the matrix?
 describe('Other', function() {
   // Wrapped in a suite to preserve test execution order
   const {createEmptySourceMap, createSingleLineSourceMap, createMultiLineSourceMap} = getSourceMapCreators();
+  const extension = 'cjs';
 
 /* The following test duplicates some of the code in
  * `compareStackTrace` but appends a charset to the
  * source mapping url.
  */
 it('finds source maps with charset specified', async function() {
-  var sourceMap = createMultiLineSourceMap()
+  var sourceMap = createMultiLineSourceMap(id, extension)
   var source = [ 'throw new Error("test");' ];
   var expected = [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line1\.js:1001:101\)$`
   ];
 
-  fs.writeFileSync('.generated.js', 'exports.test = function() {' +
+  fs.writeFileSync(`.generated-${id}.${extension}`, `${exportDecl(extension)} = function() {` +
     source.join('\n') + '};//@ sourceMappingURL=data:application/json;charset=utf8;base64,' +
     bufferFrom(sourceMap.toString()).toString('base64'));
   try {
-    delete require.cache[require.resolve('./.generated')];
-    require('./.generated').test();
+    (await import(`./.generated-${id}.${extension}`)).test();
   } catch (e) {
     compareLines(e.stack.split(/\r\n|\n/), expected);
   }
-  fs.unlinkSync('.generated.js');
+  fs.unlinkSync(`.generated-${id}.${extension}`);
 });
 
 /* The following test duplicates some of the code in
@@ -682,24 +730,24 @@ it('finds source maps with charset specified', async function() {
  * comment to the source mapping url.
  */
 it('allows code/comments after sourceMappingURL', async function() {
-  var sourceMap = createMultiLineSourceMap()
+  var sourceMap = createMultiLineSourceMap(id, extension)
   var source = [ 'throw new Error("test");' ];
   var expected = [
     'Error: test',
-    /^    at Object\.exports\.test \((?:.*[/\\])?line1\.js:1001:101\)$/
+    re`^    at (Module|Object)(\.exports)?\.test \((?:.*[/\\])?line1\.js:1001:101\)$`
   ];
 
-  fs.writeFileSync('.generated.js', 'exports.test = function() {' +
+  fs.writeFileSync(`.generated-${id}.${extension}`, `${exportDecl(extension)} = function() {` +
     source.join('\n') + '};//# sourceMappingURL=data:application/json;base64,' +
     bufferFrom(sourceMap.toString()).toString('base64') +
     '\n// Some comment below the sourceMappingURL\nvar foo = 0;');
   try {
-    delete require.cache[require.resolve('./.generated')];
-    require('./.generated').test();
+    // delete require.cache[require.resolve(`./.generated-${id}`)];
+    (await import(`./.generated-${id}.${extension}`)).test();
   } catch (e) {
     compareLines(e.stack.split(/\r\n|\n/), expected);
   }
-  fs.unlinkSync('.generated.js');
+  fs.unlinkSync(`.generated-${id}.${extension}`);
 });
 
 it('handleUncaughtExceptions is true with existing listener', function(done) {
@@ -708,24 +756,24 @@ it('handleUncaughtExceptions is true with existing listener', function(done) {
     'function foo() { throw new Error("this is the error"); }',
     'require("./source-map-support").install();',
     'process.nextTick(foo);',
-    '//@ sourceMappingURL=.generated.js.map'
+    `//@ sourceMappingURL=.generated-${id}.${extension}.map`
   ];
 
-  fs.writeFileSync('.original.js', 'this is the original code');
-  fs.writeFileSync('.generated.js.map', createSingleLineSourceMap().toString());
-  fs.writeFileSync('.generated.js', source.join('\n'));
+  fs.writeFileSync(`.original-${id}.js`, 'this is the original code');
+  fs.writeFileSync(`.generated-${id}.${extension}.map`, createSingleLineSourceMap(id, extension).toString());
+  fs.writeFileSync(`.generated-${id}.${extension}`, source.join('\n'));
 
-  child_process.exec('node ./.generated', function(error, stdout, stderr) {
-    fs.unlinkSync('.generated.js');
-    fs.unlinkSync('.generated.js.map');
-    fs.unlinkSync('.original.js');
+  child_process.exec(`node ./.generated-${id}.${extension}`, function(error, stdout, stderr) {
+    fs.unlinkSync(`.generated-${id}.${extension}`);
+    fs.unlinkSync(`.generated-${id}.${extension}.map`);
+    fs.unlinkSync(`.original-${id}.js`);
     assert.equal((stdout + stderr).trim(), '');
     done();
   });
 });
 
 it('normal console.trace', function(done) {
-  compareStdout(done, createMultiLineSourceMap(), [
+  compareStdout(done, id, extension, createMultiLineSourceMap(id, extension), [
     'require("./source-map-support").install();',
     'console.trace("test");'
   ], [
@@ -736,24 +784,24 @@ it('normal console.trace', function(done) {
 
 it('supports multiple instances', function(done) {
   function finish(err) {
-    fs.unlinkSync('.original2.js');
-    fs.unlinkSync('.generated2.js');
-    fs.unlinkSync('.generated2.js.map.extra')
+    fs.unlinkSync(`.original-${id}.js`);
+    fs.unlinkSync(`.generated-${id}.${extension}`);
+    fs.unlinkSync(`.generated-${id}.${extension}.map.extra`)
     done(err);
   }
-  var sourceMap = createEmptySourceMap();
+  var sourceMap = createEmptySourceMap(id, extension);
   sourceMap.addMapping({
     generated: { line: 1, column: 0 },
     original: { line: 1, column: 0 },
-    source: '.original2.js'
+    source: `.original-${id}.js`
   });
-  fs.writeFileSync('.generated2.js.map.extra', sourceMap.toString());
-  fs.writeFileSync('.generated2.js', [
+  fs.writeFileSync(`.generated-${id}.${extension}.map.extra`, sourceMap.toString());
+  fs.writeFileSync(`.generated-${id}.${extension}`, [
     'module.exports = function foo() { throw new Error("this is the error"); }',
-    '//@ sourceMappingURL=.generated2.js.map'
+    `//@ sourceMappingURL=.generated-${id}.${extension}.map`
   ].join('\n'));
-  fs.writeFileSync('.original2.js', 'this is some other original code');
-  compareStdout(finish, createEmptySourceMap(), [
+  fs.writeFileSync(`.original-${id}.js`, 'this is some other original code');
+  compareStdout(finish, id, extension, createEmptySourceMap(id, extension), [
     'require("./source-map-support").install({',
     '  retrieveFile: function(path) {',
     '    var fs = require("fs");',
@@ -762,17 +810,17 @@ it('supports multiple instances', function(done) {
     '    }',
     '  }',
     '});',
-    'var foo = require("./.generated2.js");',
+    `var foo = require("./.generated-${id}.${extension}");`,
     'delete require.cache[require.resolve("./source-map-support")];',
     'require("./source-map-support").install();',
     'process.nextTick(foo);',
     'process.nextTick(function() { process.exit(1); });'
   ], [
-    /[/\\].original2\.js:1$/,
+    re`[/\\].original-${id}\.js:1$`,
     'this is some other original code',
     '^',
     'Error: this is the error',
-    /^    at foo \((?:.*[/\\])?.original2\.js:1:1\)$/
+    re`^    at foo \((?:.*[/\\])?.original-${id}\.js:1:1\)$`
   ]);
 });
 });
@@ -814,6 +862,7 @@ describe('redirects require() of "source-map-support" to this module', function(
 describe('uninstall', function() {
   const sourceMapConstructors = getSourceMapCreators();
   const {normalThrow, normalThrowWithoutSourceMapSupportInstalled} = getTestMacros(sourceMapConstructors);
+
   this.beforeEach(function() {
     underTest.uninstall();
     process.emit = priorProcessEmit;
@@ -825,12 +874,12 @@ describe('uninstall', function() {
     assert.strictEqual(Error.prepareStackTrace, priorErrorPrepareStackTrace);
     assert.strictEqual(process.emit, priorProcessEmit);
     assert.strictEqual(Module._resolveFilename, priorResolveFilename);
-    normalThrowWithoutSourceMapSupportInstalled();
+    await normalThrowWithoutSourceMapSupportInstalled(id);
   });
 
   it('install re-adds hooks', async function() {
     installSms();
-    normalThrow();
+    await normalThrow(id);
   });
 
   it('uninstall removes prepareStackTrace even in presence of third-party hooks if none were installed before us', async function() {
@@ -880,7 +929,7 @@ describe('uninstall', function() {
     process.emit = thirdPartyProcessEmit;
     underTest.uninstall();
     assert.strictEqual(process.emit, thirdPartyProcessEmit);
-    normalThrowWithoutSourceMapSupportInstalled();
+    await normalThrowWithoutSourceMapSupportInstalled(id);
     process.emit('foo');
     assert(peInvocations >= 1);
   });
@@ -896,7 +945,7 @@ describe('uninstall', function() {
     Module._resolveFilename = thirdPartyModuleResolveFilename;
     underTest.uninstall();
     assert.strictEqual(Module._resolveFilename, thirdPartyModuleResolveFilename);
-    normalThrowWithoutSourceMapSupportInstalled();
+    await normalThrowWithoutSourceMapSupportInstalled(id);
     Module._resolveFilename('repl');
     assert(peInvocations >= 1);
   });
