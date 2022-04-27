@@ -542,7 +542,8 @@ function createPrepareStackTrace(hookState) {
 
 // Generate position and snippet of original source with pointer
 function getErrorSource(error) {
-  var match = /\n    at [^(]+ \((.*):(\d+):(\d+)\)/.exec(error.stack);
+  // TODO this is not robust enough
+  var match = /\n    at [^(]+ \((?:file:\/{0,2})?(.*):(\d+):(\d+)\)/.exec(error.stack);
   if (match) {
     var source = match[1];
     var line = +match[2];
