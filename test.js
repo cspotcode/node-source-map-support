@@ -594,7 +594,7 @@ it('specifically requested error source', function(done) {
   ]);
 });
 
-it.only('sourcesContent', function(done) {
+it('sourcesContent', function(done) {
   compareStdout(done, createMultiLineSourceMapWithSourcesContent(), [
     '',
     'function foo() { throw new Error("this is the error"); }',

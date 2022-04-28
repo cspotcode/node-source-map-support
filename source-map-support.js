@@ -1,7 +1,7 @@
 const { TraceMap, originalPositionFor, AnyMap } = require('@jridgewell/trace-mapping');
 const resolveUri = require('@jridgewell/resolve-uri');
 var path = require('path');
-const { fileURLToPath } = require('url');
+const { fileURLToPath, pathToFileURL } = require('url');
 var util = require('util');
 
 var fs;
@@ -94,11 +94,11 @@ var sharedData = initializeSharedData({
   emptyCacheBetweenOperations: false,
 
   // Maps a file path to a string containing the file contents
-  fileContentsCache: {},
+  fileContentsCache: Object.create(null),
 
   // Maps a file path to a source map for that file
   /** @type {Record<string, {url: string, map: TraceMap}} */
-  sourceMapCache: {},
+  sourceMapCache: Object.create(null),
 
   // Priority list of retrieve handlers
   retrieveFileHandlers: [],
@@ -128,6 +128,44 @@ function isInBrowser() {
 function hasGlobalProcessEventEmitter() {
   return ((typeof process === 'object') && (process !== null) && (typeof process.on === 'function'));
 }
+
+// #region Caches
+/** @param {string} pathOrFileUrl */
+function getCacheKey(pathOrFileUrl) {
+  if(pathOrFileUrl.startsWith('file:/')) {
+    // Must normalize spaces to %20, stuff like that
+    return new URL(pathOrFileUrl).toString();
+  } else {
+    try {
+      return pathToFileURL(pathOrFileUrl).toString();
+    } catch {
+      return pathOrFileUrl;
+    }
+  }
+}
+function getFileContentsCache(key) {
+  return sharedData.fileContentsCache[getCacheKey(key)];
+}
+function hasFileContentsCacheFromKey(key) {
+  return Object.prototype.hasOwnProperty.call(sharedData.fileContentsCache, key);
+}
+function getFileContentsCacheFromKey(key) {
+  return sharedData.fileContentsCache[key];
+}
+function setFileContentsCache(key, value) {
+  return sharedData.fileContentsCache[getCacheKey(key)] = value;
+}
+function getSourceMapCache(key) {
+  return sharedData.sourceMapCache[getCacheKey(key)];
+}
+function setSourceMapCache(key, value) {
+  return sharedData.sourceMapCache[getCacheKey(key)] = value;
+}
+function clearCaches() {
+  sharedData.fileContentsCache = Object.create(null);
+  sharedData.sourceMapCache = Object.create(null);
+}
+// #endregion Caches
 
 function handlerExec(list, internalList) {
   return function(arg) {
@@ -160,8 +198,9 @@ sharedData.internalRetrieveFileHandlers.push(function(path) {
         '/'; // file:///root-dir/file -> /root-dir/file
     });
   }
-  if (path in sharedData.fileContentsCache) {
-    return sharedData.fileContentsCache[path];
+  const key = getCacheKey(path);
+  if(hasFileContentsCacheFromKey(key)) {
+    return getFileContentsCacheFromKey(key);
   }
 
   var contents = '';
@@ -182,7 +221,7 @@ sharedData.internalRetrieveFileHandlers.push(function(path) {
     /* ignore any errors */
   }
 
-  return sharedData.fileContentsCache[path] = contents;
+  return setFileContentsCache(path, contents);
 });
 
 // Support URLs relative to a directory, but be careful about a protocol prefix
@@ -257,15 +296,15 @@ sharedData.internalRetrieveMapHandlers.push(function(source) {
 });
 
 function mapSourcePosition(position) {
-  var sourceMap = sharedData.sourceMapCache[position.source];
+  var sourceMap = getSourceMapCache(position.source);
   if (!sourceMap) {
     // Call the (overrideable) retrieveSourceMap function to get the source map.
     var urlAndMap = retrieveSourceMap(position.source);
     if (urlAndMap) {
-      sourceMap = sharedData.sourceMapCache[position.source] = {
+      sourceMap = setSourceMapCache(position.source, {
         url: urlAndMap.url,
         map: new AnyMap(urlAndMap.map, urlAndMap.url)
-      };
+      });
 
       // Load all sources stored inline with the source map into the file cache
       // to pretend like they are already loaded. They may not exist on disk.
@@ -274,15 +313,15 @@ function mapSourcePosition(position) {
           var contents = sourceMap.map.sourcesContent[i];
           if (contents) {
             var url = supportRelativeURL(sourceMap.url, source);
-            sharedData.fileContentsCache[url] = contents;
+            setFileContentsCache(url, contents);
           }
         });
       }
     } else {
-      sourceMap = sharedData.sourceMapCache[position.source] = {
+      sourceMap = setSourceMapCache(position.source, {
         url: null,
         map: null
-      };
+      });
     }
   }
 
@@ -509,8 +548,7 @@ function createPrepareStackTrace(hookState) {
     if(!hookState.enabled) return hookState.originalValue.apply(this, arguments);
 
     if (sharedData.emptyCacheBetweenOperations) {
-      sharedData.fileContentsCache = {};
-      sharedData.sourceMapCache = {};
+      clearCaches();
     }
 
     // node gives its own errors special treatment.  Mimic that behavior
@@ -550,7 +588,7 @@ function getErrorSource(error) {
     var column = +match[3];
 
     // Support the inline sourceContents inside the source map
-    var contents = sharedData.fileContentsCache[source];
+    var contents = getFileContentsCache(source);
 
     // Support files on disk
     if (!contents && fs && fs.existsSync(source)) {
@@ -705,8 +743,8 @@ exports.install = function(options) {
 
     if (!$compile.__sourceMapSupport) {
       Module.prototype._compile = function(content, filename) {
-        sharedData.fileContentsCache[filename] = content;
-        sharedData.sourceMapCache[filename] = undefined;
+        setFileContentsCache(filename, content);
+        setSourceMapCache(filename, undefined);
         return $compile.call(this, content, filename);
       };
 
