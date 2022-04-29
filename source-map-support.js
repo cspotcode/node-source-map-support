@@ -138,6 +138,17 @@ function tryFileURLToPath(v) {
   return v;
 }
 
+// TODO un-copy these from resolve-uri; see if they can be exported from that lib
+function isAbsoluteUrl(input) {
+  return schemeRegex.test(input);
+}
+// Matches the scheme of a URL, eg "http://"
+const schemeRegex = /^[\w+.-]+:\/\//;
+function isSchemeRelativeUrl(input) {
+  return input.startsWith('//');
+}
+
+
 // #region Caches
 /** @param {string} pathOrFileUrl */
 function getCacheKey(pathOrFileUrl) {
@@ -234,16 +245,6 @@ sharedData.internalRetrieveFileHandlers.push(function(path) {
 
   return setFileContentsCache(path, contents);
 });
-
-// TODO un-copy these from resolve-uri; see if they can be exported from that lib
-function isAbsoluteUrl(input) {
-  return schemeRegex.test(input);
-}
-// Matches the scheme of a URL, eg "http://"
-const schemeRegex = /^[\w+.-]+:\/\//;
-function isSchemeRelativeUrl(input) {
-  return input.startsWith('//');
-}
 
 // Support URLs relative to a directory, but be careful about a protocol prefix
 // in case we are in the browser (i.e. directories may start with "http://" or "file:///")
