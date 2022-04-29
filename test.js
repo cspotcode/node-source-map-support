@@ -33,7 +33,6 @@ function namedExportDeclaration() {
  * Example: `    at Module.exports.test (`...
  */
 function stackFrameAtTest(sourceMapSupportInstalled = true) {
-  console.log(extension);
   if(semver.gte(process.versions.node, '18.0.0')) {
     return extension === 'mjs' ? 'Module\\.test' : sourceMapSupportInstalled ? 'Module\\.exports\\.test' : 'exports\\.test';
   } else {
@@ -88,7 +87,7 @@ function compareLines(actual, expected) {
   for (var i = 0; i < expected.length; i++) {
     // Some tests are regular expressions because the output format changed slightly between node v0.9.2 and v0.9.3
     if (expected[i] instanceof RegExp) {
-      assert(expected[i].test(actual[i]), JSON.stringify(actual[i]) + ' does not match ' + expected[i]);
+      assert(expected[i].test(actual[i]), JSON.stringify(actual[i]) + ' does not match ' + expected[i] + '\n' + JSON.stringify({actual, expected: expected.map(v => typeof v === 'string' ? v : v.toString())}, null, 2));
     } else {
       assert.equal(actual[i], expected[i]);
     }
@@ -211,7 +210,9 @@ function compareStdout(done, sourceMap, source, expected) {
         (stdout + stderr)
           .trim()
           .split(/\r\n|\n/)
-          .filter(function (line) { return line !== '' }), // Empty lines are not relevant.
+          // Empty lines are not relevant.
+          // Running in a debugger causes additional output.
+          .filter(function (line) { return line !== '' && line !== 'Debugger attached.' }),
         expected
       );
     } catch (e) {

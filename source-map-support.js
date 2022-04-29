@@ -129,9 +129,20 @@ function hasGlobalProcessEventEmitter() {
   return ((typeof process === 'object') && (process !== null) && (typeof process.on === 'function'));
 }
 
+function tryFileURLToPath(v) {
+  // TODO technically, file URL can omit /s.
+  // Copy the isFileURL util from resolve-uri?
+  if(v.startsWith('file:/')) {
+    return fileURLToPath(v);
+  }
+  return v;
+}
+
 // #region Caches
 /** @param {string} pathOrFileUrl */
 function getCacheKey(pathOrFileUrl) {
+  if(pathOrFileUrl.startsWith('node:')) return pathOrFileUrl;
+  // TODO unify with isFileURL checks elsewhere?  as helper fn?
   if(pathOrFileUrl.startsWith('file:/')) {
     // Must normalize spaces to %20, stuff like that
     return new URL(pathOrFileUrl).toString();
@@ -224,9 +235,26 @@ sharedData.internalRetrieveFileHandlers.push(function(path) {
   return setFileContentsCache(path, contents);
 });
 
+// TODO un-copy these from resolve-uri; see if they can be exported from that lib
+function isAbsoluteUrl(input) {
+  return schemeRegex.test(input);
+}
+// Matches the scheme of a URL, eg "http://"
+const schemeRegex = /^[\w+.-]+:\/\//;
+function isSchemeRelativeUrl(input) {
+  return input.startsWith('//');
+}
+
 // Support URLs relative to a directory, but be careful about a protocol prefix
 // in case we are in the browser (i.e. directories may start with "http://" or "file:///")
 function supportRelativeURL(file, url) {
+  // We want to preserve path style.
+  // resolveUri cannot handle windows paths.
+  // Therefore, special-case when output will be a windows path
+  if(process.platform === 'win32' && path.isAbsolute(file) && !isAbsoluteUrl(url) && !isSchemeRelativeUrl(url)) {
+    const dir = path.dirname(file);
+    return path.resolve(dir, url);
+  }
   return resolveUri(url, file);
 }
 
@@ -251,7 +279,7 @@ function retrieveSourceMapURL(source) {
   }
 
   // Get the URL of the source map
-  fileData = retrieveFile(source);
+  fileData = retrieveFile(tryFileURLToPath(source));
   var re = /(?:\/\/[@#][\s]*sourceMappingURL=([^\s'"]+)[\s]*$)|(?:\/\*[@#][\s]*sourceMappingURL=([^\s*'"]+)[\s]*(?:\*\/)[\s]*$)/mg;
   // Keep executing the search to find the *last* sourceMappingURL to avoid
   // picking up sourceMappingURLs from comments, strings, etc.
@@ -282,7 +310,7 @@ sharedData.internalRetrieveMapHandlers.push(function(source) {
   } else {
     // Support source map URLs relative to the source URL
     sourceMappingURL = supportRelativeURL(source, sourceMappingURL);
-    sourceMapData = retrieveFile(sourceMappingURL);
+    sourceMapData = retrieveFile(tryFileURLToPath(sourceMappingURL));
   }
 
   if (!sourceMapData) {
@@ -581,7 +609,7 @@ function createPrepareStackTrace(hookState) {
 // Generate position and snippet of original source with pointer
 function getErrorSource(error) {
   // TODO this is not robust enough
-  var match = /\n    at [^(]+ \((?:file:\/{0,2})?(.*):(\d+):(\d+)\)/.exec(error.stack);
+  var match = /\n    at [^(]+ \((.*):(\d+):(\d+)\)/.exec(error.stack);
   if (match) {
     var source = match[1];
     var line = +match[2];
@@ -589,6 +617,8 @@ function getErrorSource(error) {
 
     // Support the inline sourceContents inside the source map
     var contents = getFileContentsCache(source);
+
+    source = tryFileURLToPath(source);
 
     // Support files on disk
     if (!contents && fs && fs.existsSync(source)) {
