@@ -398,8 +398,12 @@ function mapEvalOrigin(origin) {
 }
 
 // This is copied almost verbatim from the V8 source code at
-// https://code.google.com/p/v8/source/browse/trunk/src/messages.js. The
-// implementation of wrapCallSite() used to just forward to the actual source
+// https://code.google.com/p/v8/source/browse/trunk/src/messages.js
+// Update 2022-04-29:
+//    https://github.com/v8/v8/blob/98f6f100c5ab8e390e51422747c4ef644d5ac6f2/src/builtins/builtins-callsite.cc#L175-L179
+//    https://github.com/v8/v8/blob/98f6f100c5ab8e390e51422747c4ef644d5ac6f2/src/objects/call-site-info.cc#L795-L804
+//    https://github.com/v8/v8/blob/98f6f100c5ab8e390e51422747c4ef644d5ac6f2/src/objects/call-site-info.cc#L717-L750
+// The implementation of wrapCallSite() used to just forward to the actual source
 // code of CallSite.prototype.toString but unfortunately a new release of V8
 // did something to the prototype chain and broke the shim. The only fix I
 // could find was copy/paste.

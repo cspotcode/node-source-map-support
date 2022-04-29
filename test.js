@@ -16,6 +16,7 @@ var path = require('path');
 const { pathToFileURL } = require('url');
 var bufferFrom = Buffer.from;
 const semver = require('semver');
+const { once, mapValues, flow } = require('lodash');
 
 // Helper to create regular expressions from string templates, to use interpolation
 function re(...args) {
@@ -34,9 +35,9 @@ function namedExportDeclaration() {
  * This varies across CJS / ESM and node versions.
  * Example: `    at Module.exports.test (`...
  */
-function stackFrameAtTest(sourceMapSupportInstalled = true) {
+function stackFrameAtTest() {
   if(semver.gte(process.versions.node, '18.0.0')) {
-    return extension === 'mjs' ? 'Module\\.test' : sourceMapSupportInstalled ? 'Module\\.exports\\.test' : 'exports\\.test';
+    return extension === 'mjs' ? 'Module\\.test' : '(?:Module\\.)?exports\\.test';
   } else {
     return extension === 'mjs' ? 'Module\\.test' : 'Module\\.exports\\.test';
   }
@@ -194,7 +195,7 @@ async function compareStackTrace(sourceMap, source, expected) {
   fs.writeFileSync(`.generated-${id}-separate.${extension}`, `${header}${namedExportDeclaration()} = function() {` +
     source.join('\n') + `};//@ sourceMappingURL=.generated-${id}-separate.${extension}.map`);
   try {
-    (await import(`./.generated-${id}-separate.${extension}`)).test();
+    await (await import(`./.generated-${id}-separate.${extension}`)).test();
   } catch (e) {
     compareLines(e.stack.split(/\r\n|\n/), rewriteExpectation(expected, `.generated-${id}`, `.generated-${id}-separate`));
   }
@@ -204,7 +205,7 @@ async function compareStackTrace(sourceMap, source, expected) {
     source.join('\n') + '};//@ sourceMappingURL=data:application/json;base64,' +
     bufferFrom(sourceMap.toString()).toString('base64'));
   try {
-    (await import (`./.generated-${id}-inline.${extension}`)).test();
+    await (await import (`./.generated-${id}-inline.${extension}`)).test();
   } catch (e) {
     compareLines(e.stack.split(/\r\n|\n/), rewriteExpectation(expected, `.generated-${id}`, `.generated-${id}-inline`));
   }
@@ -239,6 +240,8 @@ function installSms() {
     emptyCacheBetweenOperations: true // Needed to be able to test for failure
   });
 }
+const installSmsOnce = once(installSms);
+
 
 function getTestMacros(sourceMapConstructors) {
   return {normalThrow, normalThrowWithoutSourceMapSupportInstalled};
@@ -255,7 +258,7 @@ async function normalThrowWithoutSourceMapSupportInstalled() {
     'throw new Error("test");'
   ], [
     'Error: test',
-    re`^    at ${stackFrameAtTest(false)} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.generated-${id}\.${extension}:1:123\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.generated-${id}\.${extension}:1:123\)$`
   ]);
 }
 }
@@ -318,15 +321,14 @@ describe('sourcemap style: file urls with absolute paths and sourceRoot removed,
 
 function tests(sourceMapPostprocessor) {
   // let createEmptySourceMap, createMultiLineSourceMap, createMultiLineSourceMapWithSourcesContent, createSecondLineSourceMap, createSingleLineSourceMap, createSourceMapWithGap})
-  const sourceMapConstructors = sourceMapCreators();
-  for(const [key, value] of Object.entries(sourceMapConstructors)) {
-    sourceMapConstructors[key] = (...args) => sourceMapPostprocessor(value(...args));
-  }
+  const sourceMapConstructors = mapValues(sourceMapCreators(), v => flow(v, sourceMapPostprocessor));
   const {createEmptySourceMap, createMultiLineSourceMap, createMultiLineSourceMapWithSourcesContent, createSecondLineSourceMap, createSingleLineSourceMap, createSourceMapWithGap} = sourceMapConstructors;
   const {normalThrow} = getTestMacros(sourceMapConstructors);
 
+  // Run as a hook to ensure it runs even when we execute a subset of tests
+  before(installSmsOnce);
+
 it('normal throw', async function() {
-  installSms();
   await normalThrow();
 });
 
@@ -456,6 +458,18 @@ it('function constructor', async function() {
     'throw new Function(")");'
   ], [
     /SyntaxError: Unexpected token '?\)'?/,
+  ]);
+});
+
+it('async stack frames', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
+    'async function foo() { await bar(); }',
+    'async function bar() { await null; throw new Error("test"); }',
+    'return foo()'
+  ], [
+    'Error: test',
+    re`^    at bar \(${stackFramePathStartsWith()}(?:.*[/\\])?line2.js:1002:102\)$`,
+    re`^    at async foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line1.js:1001:101\)$`
   ]);
 });
 
@@ -861,6 +875,7 @@ it('supports multiple instances', function(done) {
 }
 
 describe('redirects require() of "source-map-support" to this module', function() {
+  before(installSmsOnce);
   it('redirects', async function() {
     assert.strictEqual(require.resolve('source-map-support'), require.resolve('.'));
     assert.strictEqual(require.resolve('source-map-support/register'), require.resolve('./register'));
@@ -898,6 +913,7 @@ describe('uninstall', function() {
   const sourceMapConstructors = sourceMapCreators();
   const {normalThrow, normalThrowWithoutSourceMapSupportInstalled} = getTestMacros(sourceMapConstructors);
 
+  before(installSmsOnce);
   this.beforeEach(function() {
     underTest.uninstall();
     process.emit = priorProcessEmit;
