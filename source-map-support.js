@@ -617,12 +617,12 @@ function getErrorSource(error) {
     // Support the inline sourceContents inside the source map
     var contents = getFileContentsCache(source);
 
-    source = tryFileURLToPath(source);
+    const sourceAsPath = tryFileURLToPath(source);
 
     // Support files on disk
-    if (!contents && fs && fs.existsSync(source)) {
+    if (!contents && fs && fs.existsSync(sourceAsPath)) {
       try {
-        contents = fs.readFileSync(source, 'utf8');
+        contents = fs.readFileSync(sourceAsPath, 'utf8');
       } catch (er) {
         contents = '';
       }

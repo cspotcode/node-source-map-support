@@ -446,7 +446,7 @@ it('native function', async function() {
     '[1].map(function(x) { throw new Error(x); });'
   ], [
     'Error: 1',
-    re`[/\\].original-${id}.js`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?.original-${id}.js`,
     /at Array\.map \((native|<anonymous>)\)/
   ]);
 });
@@ -475,7 +475,7 @@ it('throw in Timeout with empty source map', function(done) {
     '    throw new Error("this is the error")',
     '})'
   ], [
-    re`[/\\].generated-${id}.${extension}:3$`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}.${extension}:3$`,
     '    throw new Error("this is the error")',
     /^          \^$/,
     'Error: this is the error',
@@ -544,7 +544,7 @@ it('default options', function(done) {
     'process.nextTick(foo);',
     'process.nextTick(function() { process.exit(1); });'
   ], [
-    re`[/\\].original-${id}\.js:1$`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?.original-${id}\.js:1$`,
     'this is the original code',
     '^',
     'Error: this is the error',
@@ -559,7 +559,7 @@ it('handleUncaughtExceptions is true', function(done) {
     'require("./source-map-support").install({ handleUncaughtExceptions: true });',
     'process.nextTick(foo);'
   ], [
-    re`[/\\].original-${id}\.js:1$`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?.original-${id}\.js:1$`,
     'this is the original code',
     '^',
     'Error: this is the error',
@@ -574,7 +574,7 @@ it('handleUncaughtExceptions is false', function(done) {
     'require("./source-map-support").install({ handleUncaughtExceptions: false });',
     'process.nextTick(foo);'
   ], [
-    re`[/\\].generated-${id}.${extension}:2$`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}.${extension}:2$`,
     'function foo() { throw new Error("this is the error"); }',
 
     '                 ^',
@@ -591,7 +591,7 @@ it('default options with empty source map', function(done) {
     'require("./source-map-support").install();',
     'process.nextTick(foo);'
   ], [
-    re`[/\\].generated-${id}.${extension}:2$`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}.${extension}:2$`,
     'function foo() { throw new Error("this is the error"); }',
     '                       ^',
     'Error: this is the error',
@@ -606,7 +606,7 @@ it('default options with source map with gap', function(done) {
     'require("./source-map-support").install();',
     'process.nextTick(foo);'
   ], [
-    re`[/\\].generated-${id}.${extension}:2$`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}.${extension}:2$`,
     'function foo() { throw new Error("this is the error"); }',
     '                       ^',
     'Error: this is the error',
@@ -637,7 +637,7 @@ it('sourcesContent', function(done) {
     'process.nextTick(foo);',
     'process.nextTick(function() { process.exit(1); });'
   ], [
-    re`[/\\]original-${id}\.js:1002$`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?original-${id}\.js:1002$`,
     '    line 2',
     '    ^',
     'Error: this is the error',
@@ -851,7 +851,7 @@ it('supports multiple instances', function(done) {
     '  process.nextTick(function() { process.exit(1); });',
     '})();'
   ], [
-    re`[/\\].original2-${id}\.js:1$`,
+    re`${stackFramePathStartsWith()}(?:.*[/\\])?.original2-${id}\.js:1$`,
     'this is some other original code',
     '^',
     'Error: this is the error',
