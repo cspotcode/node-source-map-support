@@ -12,6 +12,8 @@ var child_process = require('child_process');
 var assert = require('assert');
 var fs = require('fs');
 var util = require('util');
+var path = require('path');
+const { pathToFileURL } = require('url');
 var bufferFrom = Buffer.from;
 const semver = require('semver');
 
@@ -44,6 +46,17 @@ function stackFrameAtTest(sourceMapSupportInstalled = true) {
  */
 function stackFrameAtTrace(fileRe) {
   return extension === 'mjs' ? `${fileRe}` : `Object\\.<anonymous> \\(${fileRe}\\)`;
+}
+/**
+ * Describe how the source path in a stack frame is expected to start.
+ * If generated module is ESM, node uses file:// URL, so we expect mapped original path to also be file:// to match
+ * On windows, when not doing file:// URIs, expect windows-style paths
+ */
+function stackFramePathStartsWith() {
+  if(extension === 'mjs') return 'file:/';
+  // Escape backslashes since we are returning regexp syntax
+  return path.parse(process.cwd()).root.replace(/\\/g, '\\\\');
+  // this re \((?:.*[/\\])?
 }
 /**
  * Tests were initially written as CJS with require() calls.
@@ -177,7 +190,6 @@ function rewriteExpectation(expected, generatedFilenameIn, generatedFilenameOut)
 async function compareStackTrace(sourceMap, source, expected) {
   const header = srcPrefix();
   // Check once with a separate source map
-  // fs.writeFileSync(`.generated-${id}-separate.${extension}.map`, JSON.stringify({...JSON.parse(sourceMap.toString()), file: `.generated-${id}-separate.${extension}`}));
   fs.writeFileSync(`.generated-${id}-separate.${extension}.map`, sourceMap.toString());
   fs.writeFileSync(`.generated-${id}-separate.${extension}`, `${header}${namedExportDeclaration()} = function() {` +
     source.join('\n') + `};//@ sourceMappingURL=.generated-${id}-separate.${extension}.map`);
@@ -235,7 +247,7 @@ async function normalThrow() {
     'throw new Error("test");'
   ], [
     'Error: test',
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line1\.js:1001:101\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 }
 async function normalThrowWithoutSourceMapSupportInstalled() {
@@ -243,7 +255,7 @@ async function normalThrowWithoutSourceMapSupportInstalled() {
     'throw new Error("test");'
   ], [
     'Error: test',
-    re`^    at ${stackFrameAtTest(false)} \((?:.*[/\\])?\.generated-${id}\.${extension}:1:123\)$`
+    re`^    at ${stackFrameAtTest(false)} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.generated-${id}\.${extension}:1:123\)$`
   ]);
 }
 }
@@ -335,7 +347,7 @@ it('fs.readFileSync failure', async function() {
     '}'
   ], [
     'Error: test',
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line7\.js:1007:107\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line7\.js:1007:107\)$`
   ]);
 });
 
@@ -348,8 +360,8 @@ it('throw inside function', async function() {
     'foo();'
   ], [
     'Error: test',
-    /^    at foo \((?:.*[/\\])?line2\.js:1002:102\)$/,
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line4\.js:1004:104\)$`
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line2\.js:1002:102\)$`,
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line4\.js:1004:104\)$`
   ]);
 });
 
@@ -364,9 +376,9 @@ it('throw inside function inside function', async function() {
     'foo();'
   ], [
     'Error: test',
-    /^    at bar \((?:.*[/\\])?line3\.js:1003:103\)$/,
-    /^    at foo \((?:.*[/\\])?line5\.js:1005:105\)$/,
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line7\.js:1007:107\)$`
+    re`^    at bar \(${stackFramePathStartsWith()}(?:.*[/\\])?line3\.js:1003:103\)$`,
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line5\.js:1005:105\)$`,
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line7\.js:1007:107\)$`
   ]);
 });
 
@@ -377,9 +389,9 @@ it('eval', async function() {
     'Error: test',
 
     // TODO
-    /^    at eval \(eval at (<anonymous>|exports\.test|test) \((?:.*[/\\])?line1\.js:1001:101\)/,
+    re`^    at eval \(eval at (<anonymous>|exports\.test|test) \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)`,
 
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line1\.js:1001:101\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 });
 
@@ -388,9 +400,9 @@ it('eval inside eval', async function() {
     'eval("eval(\'throw new Error(\\"test\\")\')");'
   ], [
     'Error: test',
-    /^    at eval \(eval at (<anonymous>|exports\.test|test) \(eval at (<anonymous>|exports\.test|test) \((?:.*[/\\])?line1\.js:1001:101\)/,
-    /^    at eval \(eval at (<anonymous>|exports\.test|test) \((?:.*[/\\])?line1\.js:1001:101\)/,
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line1\.js:1001:101\)$`
+    re`^    at eval \(eval at (<anonymous>|exports\.test|test) \(eval at (<anonymous>|exports\.test|test) \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)`,
+    re`^    at eval \(eval at (<anonymous>|exports\.test|test) \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)`,
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 });
 
@@ -402,9 +414,9 @@ it('eval inside function', async function() {
     'foo();'
   ], [
     'Error: test',
-    /^    at eval \(eval at foo \((?:.*[/\\])?line2\.js:1002:102\)/,
-    /^    at foo \((?:.*[/\\])?line2\.js:1002:102\)/,
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line4\.js:1004:104\)$`
+    re`^    at eval \(eval at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line2\.js:1002:102\)`,
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line2\.js:1002:102\)`,
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line4\.js:1004:104\)$`
   ]);
 });
 
@@ -414,7 +426,7 @@ it('eval with sourceURL', async function() {
   ], [
     'Error: test',
     /^    at eval \(sourceURL\.js:1:7\)$/,
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line1\.js:1001:101\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 });
 
@@ -424,8 +436,8 @@ it('eval with sourceURL inside eval', async function() {
   ], [
     'Error: test',
     /^    at eval \(sourceURL\.js:1:7\)$/,
-    /^    at eval \(eval at (<anonymous>|exports.test|test) \((?:.*[/\\])?line1\.js:1001:101\)/,
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line1\.js:1001:101\)$`
+    re`^    at eval \(eval at (<anonymous>|exports.test|test) \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)`,
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)$`
   ]);
 });
 
@@ -452,7 +464,7 @@ it('throw with empty source map', async function() {
     'throw new Error("test");'
   ], [
     'Error: test',
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?\.generated-${id}.${extension}:1:123\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.generated-${id}.${extension}:1:123\)$`
   ]);
 });
 
@@ -467,7 +479,7 @@ it('throw in Timeout with empty source map', function(done) {
     '    throw new Error("this is the error")',
     /^          \^$/,
     'Error: this is the error',
-    re`^    at ((null)|(Timeout))\._onTimeout \((?:.*[/\\])?.generated-${id}\.${extension}:3:11\)$`
+    re`^    at ((null)|(Timeout))\._onTimeout \(${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}\.${extension}:3:11\)$`
   ]);
 });
 
@@ -476,7 +488,7 @@ it('throw with source map with gap', async function() {
     'throw new Error("test");'
   ], [
     'Error: test',
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?\.generated-${id}\.${extension}:1:123\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.generated-${id}\.${extension}:1:123\)$`
   ]);
 });
 
@@ -485,7 +497,7 @@ it('sourcesContent with data URL', async function() {
     'throw new Error("test");'
   ], [
     'Error: test',
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?original-${id}\.js:1001:5\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?original-${id}\.js:1001:5\)$`
   ]);
 });
 
@@ -495,7 +507,7 @@ it('finds the last sourceMappingURL', async function() {
     'throw new Error("test");'
   ], [
     'Error: test',
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?original-${id}\.js:1002:5\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?original-${id}\.js:1002:5\)$`
   ]);
 });
 
@@ -519,8 +531,8 @@ it('maps original name from source', async function() {
     'foo();'
   ], [
     'Error: test',
-    re`^    at myOriginalName \((?:.*[/\\])?\.original-${id}.js:1000:11\)$`,
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?\.original-${id}.js:1002:2\)$`
+    re`^    at myOriginalName \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}.js:1000:11\)$`,
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}.js:1002:2\)$`
   ]);
 });
 
@@ -536,7 +548,7 @@ it('default options', function(done) {
     'this is the original code',
     '^',
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?\.original-${id}\.js:1:1\)$`
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}\.js:1:1\)$`
   ]);
 });
 
@@ -551,7 +563,7 @@ it('handleUncaughtExceptions is true', function(done) {
     'this is the original code',
     '^',
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?\.original-${id}\.js:1:1\)$`
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}\.js:1:1\)$`
   ]);
 });
 
@@ -568,7 +580,7 @@ it('handleUncaughtExceptions is false', function(done) {
     '                 ^',
 
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?.original-${id}\.js:1:1\)$`
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?.original-${id}\.js:1:1\)$`
   ]);
 });
 
@@ -583,7 +595,7 @@ it('default options with empty source map', function(done) {
     'function foo() { throw new Error("this is the error"); }',
     '                       ^',
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?.generated-${id}.${extension}:2:24\)$`
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}.${extension}:2:24\)$`
   ]);
 });
 
@@ -598,7 +610,7 @@ it('default options with source map with gap', function(done) {
     'function foo() { throw new Error("this is the error"); }',
     '                       ^',
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?.generated-${id}.${extension}:2:24\)$`
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}.${extension}:2:24\)$`
   ]);
 });
 
@@ -629,7 +641,7 @@ it('sourcesContent', function(done) {
     '    line 2',
     '    ^',
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?original-${id}\.js:1002:5\)$`
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?original-${id}\.js:1002:5\)$`
   ]);
 });
 
@@ -652,14 +664,18 @@ it('missing source maps should also be cached', function(done) {
     'process.nextTick(function() { console.log(count); });',
   ], [
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?.generated-${id}.${extension}:4:15\)$`,
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}.${extension}:4:15\)$`,
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?.generated-${id}.${extension}:4:15\)$`,
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?.generated-${id}.${extension}:4:15\)$`,
     '1', // The retrieval should only be attempted once
   ]);
 });
 
 it('should consult all retrieve source map providers', function(done) {
+  // TODO are we supposed to be resolving this URL to absolute?  Or should we test that non-absolute is supported?
+  // Test in vanilla source-map-support
+  let originalPath = path.resolve(`.original-${id}.js`);
+  if(extension === 'mjs') originalPath = pathToFileURL(originalPath).toString();
   compareStdout(done, createSingleLineSourceMap(), [
     '',
     'var count = 0;',
@@ -676,7 +692,7 @@ it('should consult all retrieve source map providers', function(done) {
     '  retrieveSourceMap: function(name) {',
     `    if (/\\.generated-${id}\\.${extension}$/.test(name)) {`,
     '      count++;',
-    '      return ' + JSON.stringify({url: `.original-${id}.js`, map: createMultiLineSourceMapWithSourcesContent().toJSON()}) + ';',
+    '      return ' + JSON.stringify({url: originalPath, map: createMultiLineSourceMapWithSourcesContent().toJSON()}) + ';',
     '    }',
     '  }',
     '});',
@@ -685,9 +701,9 @@ it('should consult all retrieve source map providers', function(done) {
     'process.nextTick(function() { console.log(count); });',
   ], [
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?original-${id}\.js:1004:5\)$`,
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?original-${id}\.js:1004:5\)$`,
     'Error: this is the error',
-    re`^    at foo \((?:.*[/\\])?original-${id}\.js:1004:5\)$`,
+    re`^    at foo \(${stackFramePathStartsWith()}(?:.*[/\\])?original-${id}\.js:1004:5\)$`,
     '1', // The retrieval should only be attempted once
   ]);
 });
@@ -728,13 +744,6 @@ it('should allow for runtime inline source maps', function(done) {
     '0', // The retrieval should only be attempted once
   ]);
 });
-// }
-
-// TODO should this suite also be inside the matrix?
-// describe('Other', function() {
-  // Wrapped in a suite to preserve test execution order
-  // const {createEmptySourceMap, createSingleLineSourceMap, createMultiLineSourceMap} = sourceMapCreators();
-  // const extension = 'cjs';
 
 /* The following test duplicates some of the code in
  * `compareStackTrace` but appends a charset to the
@@ -745,7 +754,7 @@ it('finds source maps with charset specified', async function() {
   var source = [ 'throw new Error("test");' ];
   var expected = [
     'Error: test',
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line1\.js:1001:101\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)$`
   ];
 
   fs.writeFileSync(`.generated-${id}.${extension}`, `${namedExportDeclaration()} = function() {` +
@@ -767,7 +776,7 @@ it('allows code/comments after sourceMappingURL', async function() {
   var source = [ 'throw new Error("test");' ];
   var expected = [
     'Error: test',
-    re`^    at ${stackFrameAtTest()} \((?:.*[/\\])?line1\.js:1001:101\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)$`
   ];
 
   fs.writeFileSync(`.generated-${id}.${extension}`, `${namedExportDeclaration()} = function() {` +
@@ -846,10 +855,9 @@ it('supports multiple instances', function(done) {
     'this is some other original code',
     '^',
     'Error: this is the error',
-    re`^    at test \((?:.*[/\\])?.original2-${id}\.js:1:1\)$`
+    re`^    at test \(${stackFramePathStartsWith()}(?:.*[/\\])?.original2-${id}\.js:1:1\)$`
   ]);
 });
-// });
 }
 
 describe('redirects require() of "source-map-support" to this module', function() {

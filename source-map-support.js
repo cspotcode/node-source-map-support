@@ -608,7 +608,6 @@ function createPrepareStackTrace(hookState) {
 
 // Generate position and snippet of original source with pointer
 function getErrorSource(error) {
-  // TODO this is not robust enough
   var match = /\n    at [^(]+ \((.*):(\d+):(\d+)\)/.exec(error.stack);
   if (match) {
     var source = match[1];
