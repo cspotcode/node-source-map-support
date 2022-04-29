@@ -132,13 +132,16 @@ function hasGlobalProcessEventEmitter() {
 function tryFileURLToPath(v) {
   // TODO technically, file URL can omit /s.
   // Copy the isFileURL util from resolve-uri?
-  if(v.startsWith('file:/')) {
+  if(isFileUrl(v)) {
     return fileURLToPath(v);
   }
   return v;
 }
 
 // TODO un-copy these from resolve-uri; see if they can be exported from that lib
+function isFileUrl(input) {
+  return input.startsWith('file:');
+}
 function isAbsoluteUrl(input) {
   return schemeRegex.test(input);
 }
@@ -147,7 +150,6 @@ const schemeRegex = /^[\w+.-]+:\/\//;
 function isSchemeRelativeUrl(input) {
   return input.startsWith('//');
 }
-
 
 // #region Caches
 /** @param {string} pathOrFileUrl */
@@ -252,9 +254,14 @@ function supportRelativeURL(file, url) {
   // We want to preserve path style.
   // resolveUri cannot handle windows paths.
   // Therefore, special-case when output will be a windows path
-  if(process.platform === 'win32' && path.isAbsolute(file) && !isAbsoluteUrl(url) && !isSchemeRelativeUrl(url)) {
-    const dir = path.dirname(file);
-    return path.resolve(dir, url);
+  if(process.platform === 'win32') {
+    if(path.isAbsolute(file) && !isAbsoluteUrl(url) && !isSchemeRelativeUrl(url)) {
+      const dir = path.dirname(file);
+      return path.resolve(dir, url);
+    }
+    // if(isFileUrl(file) && path.isAbsolute(url)) {
+    //   url = pathToFileURL(url).toString();
+    // }
   }
   return resolveUri(url, file);
 }
@@ -335,14 +342,17 @@ function mapSourcePosition(position) {
         map: new AnyMap(urlAndMap.map, urlAndMap.url)
       });
 
+      // Overwrite trace-mapping's resolutions, because they do not handle
+      // Windows paths the way we want.
+      sourceMap.map.resolvedSources = sourceMap.map.sources.map(s => supportRelativeURL(sourceMap.url, s));
+
       // Load all sources stored inline with the source map into the file cache
       // to pretend like they are already loaded. They may not exist on disk.
       if (sourceMap.map.sourcesContent) {
-        sourceMap.map.sources.forEach(function(source, i) {
+        sourceMap.map.resolvedSources.forEach(function(resolvedSource, i) {
           var contents = sourceMap.map.sourcesContent[i];
           if (contents) {
-            var url = supportRelativeURL(sourceMap.url, source);
-            setFileContentsCache(url, contents);
+            setFileContentsCache(resolvedSource, contents);
           }
         });
       }
