@@ -485,24 +485,43 @@ it('Verify node does not support Promise.allSettled stack frames. When this test
   assert.doesNotMatch(results2[2].reason.stack, /\bPromise\.allSettled\b/);
 });
 
-it('async stack frames: async, Promise.all, Promise.any'/*Promise.allSettled*/, async function() {
+it('async stack frames: async, Promise.all'/*Promise.allSettled*/, async function() {
   await compareStackTrace(createMultiLineSourceMap(), [
     // Add once node upgrades to v8 10.2, where this was added: https://github.com/v8/v8/commit/89ed081c176e286f9d65f3821d43f568cd56a035
     // 'async function foo() { return await bar(); }',
     // 'async function bar() { return await Promise.allSettled([baz()]) }',
 
-    'async function foo() { return await baz(); }',
-    'async function baz() { await Promise.all([biff()]) }',
-    'async function biff() { await Promise.any([larry()]); }',
-    'async function larry() { await null; throw new Error("test"); }',
+    'async function foo() { return await bar(); }',
+    'async function bar() { await Promise.all([baz()]) }',
+    'async function baz() { await null; throw new Error("test"); }',
+    'return foo();'
+  ], [
+    'Error: test',
+    re`^    at baz \(${stackFramePathStartsWith()}(?:.*[/\\])?line3.js:1003:103\)$`,
+    re`^    at async Promise\.all \(index 0\)$`,
+    re`^    at async bar \(${stackFramePathStartsWith()}(?:.*[/\\])?line2.js:1002:102\)$`,
+    re`^    at async foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line1.js:1001:101\)$`
+  ]);
+});
+
+it('async stack frames: Promise.any', async function() {
+  // node 14 and older does not have Promise.any
+  if(semver.lt(process.versions.node, '16.0.0')) return this.skip();
+
+  await compareStackTrace(createMultiLineSourceMap(), [
+    // Add once node upgrades to v8 10.2, where this was added: https://github.com/v8/v8/commit/89ed081c176e286f9d65f3821d43f568cd56a035
+    // 'async function foo() { return await bar(); }',
+    // 'async function bar() { return await Promise.allSettled([baz()]) }',
+
+    'async function foo() { return await bar(); }',
+    'async function bar() { await Promise.any([baz()]); }',
+    'async function baz() { await null; throw new Error("test"); }',
     'return foo().catch(e => { throw e.errors[0] })'
   ], [
     'Error: test',
-    re`^    at larry \(${stackFramePathStartsWith()}(?:.*[/\\])?line4.js:1004:104\)$`,
+    re`^    at baz \(${stackFramePathStartsWith()}(?:.*[/\\])?line3.js:1003:103\)$`,
     re`^    at async Promise\.any \(index 0\)$`,
-    re`^    at async biff \(${stackFramePathStartsWith()}(?:.*[/\\])?line3.js:1003:103\)$`,
-    re`^    at async Promise\.all \(index 0\)$`,
-    re`^    at async baz \(${stackFramePathStartsWith()}(?:.*[/\\])?line2.js:1002:102\)$`,
+    re`^    at async bar \(${stackFramePathStartsWith()}(?:.*[/\\])?line2.js:1002:102\)$`,
     re`^    at async foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line1.js:1001:101\)$`
   ]);
 });
