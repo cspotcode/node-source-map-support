@@ -461,14 +461,48 @@ it('function constructor', async function() {
   ]);
 });
 
-it('async stack frames', async function() {
+it('Verify node does not support Promise.allSettled stack frames. When this test starts breaking, we need to start testing for Promise.allSettled.', async () => {
+  // results1/driver1 is not strictly necessary to test allSettled; it is here to remind myself how to correctly get Promise.* methods to appear in a stack trace.
+  let result1;
+  await driver1().catch(e => result1 = e);
+  assert.match(result1.stack, /\bPromise\.all\b/);
+
+  // Copied from V8 tests: https://github.com/v8/v8/commit/89ed081c176e286f9d65f3821d43f568cd56a035#diff-1a0a032688d7546dcfe5730eaab2854fb1b8dab656d8bb940dffc71b7b975aae
+  async function fine() { }
+  async function thrower() {
+    await fine();
+    throw new Error();
+  }
+  async function driver1() {
+    return await Promise.all([fine(), fine(), thrower(), thrower()]);
+  }
+  async function driver2() {
+    return await Promise.allSettled([fine(), fine(), thrower(), thrower()]);
+  }
+
+  const results2 = await driver2();
+  assert.equal(results2[2].status, 'rejected');
+  assert.doesNotMatch(results2[2].reason.stack, /\bPromise\.allSettled\b/);
+});
+
+it('async stack frames: async, Promise.all, Promise.any'/*Promise.allSettled*/, async function() {
   await compareStackTrace(createMultiLineSourceMap(), [
-    'async function foo() { await bar(); }',
-    'async function bar() { await null; throw new Error("test"); }',
-    'return foo()'
+    // Add once node upgrades to v8 10.2, where this was added: https://github.com/v8/v8/commit/89ed081c176e286f9d65f3821d43f568cd56a035
+    // 'async function foo() { return await bar(); }',
+    // 'async function bar() { return await Promise.allSettled([baz()]) }',
+
+    'async function foo() { return await baz(); }',
+    'async function baz() { await Promise.all([biff()]) }',
+    'async function biff() { await Promise.any([larry()]); }',
+    'async function larry() { await null; throw new Error("test"); }',
+    'return foo().catch(e => { throw e.errors[0] })'
   ], [
     'Error: test',
-    re`^    at bar \(${stackFramePathStartsWith()}(?:.*[/\\])?line2.js:1002:102\)$`,
+    re`^    at larry \(${stackFramePathStartsWith()}(?:.*[/\\])?line4.js:1004:104\)$`,
+    re`^    at async Promise\.any \(index 0\)$`,
+    re`^    at async biff \(${stackFramePathStartsWith()}(?:.*[/\\])?line3.js:1003:103\)$`,
+    re`^    at async Promise\.all \(index 0\)$`,
+    re`^    at async baz \(${stackFramePathStartsWith()}(?:.*[/\\])?line2.js:1002:102\)$`,
     re`^    at async foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line1.js:1001:101\)$`
   ]);
 });
