@@ -129,8 +129,6 @@ function hasGlobalProcessEventEmitter() {
 }
 
 function tryFileURLToPath(v) {
-  // TODO technically, file URL can omit /s.
-  // Copy the isFileURL util from resolve-uri?
   if(isFileUrl(v)) {
     return fileURLToPath(v);
   }
@@ -154,8 +152,7 @@ function isSchemeRelativeUrl(input) {
 /** @param {string} pathOrFileUrl */
 function getCacheKey(pathOrFileUrl) {
   if(pathOrFileUrl.startsWith('node:')) return pathOrFileUrl;
-  // TODO unify with isFileURL checks elsewhere?  as helper fn?
-  if(pathOrFileUrl.startsWith('file:/')) {
+  if(isFileUrl(pathOrFileUrl)) {
     // Must normalize spaces to %20, stuff like that
     return new URL(pathOrFileUrl).toString();
   } else {

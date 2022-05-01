@@ -390,7 +390,6 @@ it('eval', async function() {
   ], [
     'Error: test',
 
-    // TODO
     re`^    at eval \(eval at (<anonymous>|exports\.test|test) \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)`,
 
     re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?line1\.js:1001:101\)$`
