@@ -520,6 +520,12 @@ function wrapCallSite(frame, state) {
   // from getScriptNameOrSourceURL() instead
   var source = frame.getFileName() || frame.getScriptNameOrSourceURL();
   if (source) {
+    // v8 does not expose its internal isWasm, etc methods, so we do this instead.
+    if(source.startsWith('wasm://')) {
+      state.curPosition = null;
+      return frame;
+    }
+
     var line = frame.getLineNumber();
     var column = frame.getColumnNumber() - 1;
 

@@ -526,6 +526,17 @@ it('async stack frames: Promise.any', async function() {
   ]);
 });
 
+it('wasm stack frames', async function() {
+  await compareStackTrace(createMultiLineSourceMap(), [
+    'return require("./test-fixtures/wasm/wasm.js").call_js_function(() => { throw new Error("test"); });'
+  ], [
+    'Error: test',
+    re`^    at ${stackFramePathStartsWith()}(?:.*[/\\])?line1.js:1001:101$`,
+    re`^    at wasm:\/\/wasm\/c2de0ab2:wasm-function\[1\]:0x3b$`,
+    re`^    at Object\.exports\.call_js_function \(.*[/\\]wasm\.js:13:24\)$`,
+  ]);
+});
+
 it('throw with empty source map', async function() {
   await compareStackTrace(createEmptySourceMap(), [
     'throw new Error("test");'
