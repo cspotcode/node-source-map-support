@@ -1,7 +1,7 @@
 {
   "name": "@cspotcode/source-map-support",
   "description": "Fixes stack traces for files with source maps",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "main": "./source-map-support.js",
   "types": "./source-map-support.d.ts",
   "scripts": {
