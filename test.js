@@ -1072,3 +1072,6 @@ describe('uninstall', function() {
     assert(peInvocations >= 1);
   });
 });
+// Without this, the code under test sees stuff in the test cases above and tries to load source-maps
+// This causes confusing red herrings while debugging.
+//#sourceMappingURL=test.js.map-intentionally-does-not-exist

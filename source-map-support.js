@@ -1,5 +1,4 @@
 const { TraceMap, originalPositionFor, AnyMap } = require('@jridgewell/trace-mapping');
-const resolveUri = require('@jridgewell/resolve-uri');
 var path = require('path');
 const { fileURLToPath, pathToFileURL } = require('url');
 var util = require('util');
@@ -251,19 +250,51 @@ sharedData.internalRetrieveFileHandlers.push(function(path) {
 // Support URLs relative to a directory, but be careful about a protocol prefix
 // in case we are in the browser (i.e. directories may start with "http://" or "file:///")
 function supportRelativeURL(file, url) {
-  // We want to preserve path style.
-  // resolveUri cannot handle windows paths.
-  // Therefore, special-case when output will be a windows path
-  if(process.platform === 'win32') {
-    if(path.isAbsolute(file) && !isAbsoluteUrl(url) && !isSchemeRelativeUrl(url)) {
-      const dir = path.dirname(file);
-      return path.resolve(dir, url);
+  if(!file) return url;
+  // given that this happens within error formatting codepath, probably best to
+  // fallback instead of throwing if anything goes wrong
+  try {
+    // if should output a URL
+    if(isAbsoluteUrl(file) || isSchemeRelativeUrl(file)) {
+        if(isAbsoluteUrl(url) || isSchemeRelativeUrl(url)) {
+            return new URL(url, file).toString();
+        }
+        if(path.isAbsolute(url)) {
+            return new URL(pathToFileURL(url), file).toString();
+        }
+        // url is relative path or URL
+        return new URL(url.replace(/\\/g, '/'), file).toString();
     }
-    if(isFileUrl(file) && path.isAbsolute(url)) {
-      url = pathToFileURL(url).toString();
+    // if should output a path (unless URL is something like https://)
+    if(path.isAbsolute(file)) {
+        if(isFileUrl(url)) {
+            return fileURLToPath(url);
+        }
+        if(isSchemeRelativeUrl(url)) {
+            return fileURLToPath(new URL(url, 'file://'));
+        }
+        if(isAbsoluteUrl(url)) {
+            // url is a non-file URL
+            // Go with the URL
+            return url;
+        }
+        if(path.isAbsolute(url)) {
+            return url;
+            // Normalize at all?  decodeURI or normalize slashes?
+        }
+        // url is relative path or URL
+        return path.join(file, '..', decodeURI(url));
     }
+    // If we get here, file is relative.
+    // Shouldn't happen since node identifies modules with absolute paths or URLs.
+    // But we can take a stab at returning something meaningful anyway.
+    if(isAbsoluteUrl(url) || isSchemeRelativeUrl(url)) {
+        return url;
+    }
+    return path.join(file, '..', url);
+  } catch(e) {
+      return url;
   }
-  return resolveUri(url, file);
 }
 
 function retrieveSourceMapURL(source) {
