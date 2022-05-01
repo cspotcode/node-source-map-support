@@ -279,8 +279,8 @@ function supportRelativeURL(file, url) {
             return url;
         }
         if(path.isAbsolute(url)) {
-            return url;
             // Normalize at all?  decodeURI or normalize slashes?
+            return path.normalize(url);
         }
         // url is relative path or URL
         return path.join(file, '..', decodeURI(url));
@@ -294,6 +294,23 @@ function supportRelativeURL(file, url) {
     return path.join(file, '..', url);
   } catch(e) {
       return url;
+  }
+}
+
+// Return pathOrUrl in the same style as matchStyleOf: either a file URL or a native path
+function matchStyleOfPathOrUrl(matchStyleOf, pathOrUrl) {
+  try {
+    if(isAbsoluteUrl(matchStyleOf) || isSchemeRelativeUrl(matchStyleOf)) {
+      if(isAbsoluteUrl(pathOrUrl) || isSchemeRelativeUrl(pathOrUrl)) return pathOrUrl;
+      if(path.isAbsolute(pathOrUrl)) return pathToFileURL(pathOrUrl).toString();
+    } else if(path.isAbsolute(matchStyleOf)) {
+      if(isAbsoluteUrl(pathOrUrl) || isSchemeRelativeUrl(pathOrUrl)) {
+        return fileURLToPath(new URL(pathOrUrl, 'file://'));
+      }
+    }
+    return pathOrUrl;
+  } catch(e) {
+    return pathOrUrl;
   }
 }
 
@@ -375,6 +392,7 @@ function mapSourcePosition(position) {
 
       // Overwrite trace-mapping's resolutions, because they do not handle
       // Windows paths the way we want.
+      // TODO Remove now that windows path support was added to resolve-uri and thus trace-mapping?
       sourceMap.map.resolvedSources = sourceMap.map.sources.map(s => supportRelativeURL(sourceMap.url, s));
 
       // Load all sources stored inline with the source map into the file cache
@@ -405,8 +423,11 @@ function mapSourcePosition(position) {
     // better to give a precise location in the compiled file than a vague
     // location in the original file.
     if (originalPosition.source !== null) {
-      originalPosition.source = supportRelativeURL(
-        sourceMap.url, originalPosition.source);
+      // originalPosition.source has *already* been resolved against sourceMap.url
+      // so is *already* as absolute as possible.
+      // However, we want to ensure we output in same format as input: URL or native path
+      originalPosition.source = matchStyleOfPathOrUrl(
+        position.source, originalPosition.source);
       return originalPosition;
     }
   }
