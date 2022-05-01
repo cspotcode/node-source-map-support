@@ -527,12 +527,19 @@ it('async stack frames: Promise.any', async function() {
 });
 
 it('wasm stack frames', async function() {
+  const wasmFrame = semver.gte(process.versions.node, '16.0.0')
+    ? String.raw`wasm:\/\/wasm\/c2de0ab2:wasm-function\[1\]:0x3b`
+    : semver.gte(process.versions.node, '14.0.0')
+    ? String.raw`call_js_function \(<anonymous>:wasm-function\[1\]:0x3b\)`
+    // Node 12
+    : String.raw`wasm-function\[1\]:0x3b`;
+
   await compareStackTrace(createMultiLineSourceMap(), [
     'return require("./test-fixtures/wasm/wasm.js").call_js_function(() => { throw new Error("test"); });'
   ], [
     'Error: test',
     re`^    at ${stackFramePathStartsWith()}(?:.*[/\\])?line1.js:1001:101$`,
-    re`^    at wasm:\/\/wasm\/c2de0ab2:wasm-function\[1\]:0x3b$`,
+    re`^    at ${wasmFrame}$`,
     re`^    at Object\.exports\.call_js_function \(.*[/\\]wasm\.js:13:24\)$`,
   ]);
 });
