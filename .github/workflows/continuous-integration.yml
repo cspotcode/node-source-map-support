@@ -18,6 +18,8 @@ jobs:
       matrix:
         os: [ubuntu, windows]
         node:
+          - 18
+          - 17
           - 16
           - 14
           - 12

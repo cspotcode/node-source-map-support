@@ -1,0 +1,15 @@
+{
+  "configurations": [
+    {
+      "name": "Debug Mocha tests",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/_mocha",
+      "runtimeArgs": ["--timeout", "999999999"],
+      "outputCapture": "std",
+      "skipFiles": [
+        "<node_internals>/**/*.js"
+      ],
+    }
+  ],
+}
