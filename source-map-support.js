@@ -259,9 +259,9 @@ function supportRelativeURL(file, url) {
       const dir = path.dirname(file);
       return path.resolve(dir, url);
     }
-    // if(isFileUrl(file) && path.isAbsolute(url)) {
-    //   url = pathToFileURL(url).toString();
-    // }
+    if(isFileUrl(file) && path.isAbsolute(url)) {
+      url = pathToFileURL(url).toString();
+    }
   }
   return resolveUri(url, file);
 }
