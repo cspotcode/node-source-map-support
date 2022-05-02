@@ -662,7 +662,7 @@ function createPrepareStackTrace(hookState) {
     } else {
       var name = error.name || 'Error';
       var message = error.message || '';
-      errorString = name + ": " + message;
+      errorString = message ? name + ": " + message : name;
     }
 
     var state = { nextPosition: null, curPosition: null };
