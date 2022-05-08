@@ -92,6 +92,10 @@ var sharedData = initializeSharedData({
   // If true, the caches are reset before a stack trace formatting operation
   emptyCacheBetweenOperations: false,
 
+  // If true, will fallback to getting mapped function name from callsite (from the following stack frame) when neither
+  // enclosing position nor runtime have a function name.
+  callsiteFallback: true,
+
   // Maps a file path to a string containing the file contents
   fileContentsCache: Object.create(null),
 
@@ -619,7 +623,7 @@ function wrapCallSite(frame, state) {
       if(enclosingName != null) return enclosingName;
       const originalName = originalFunctionName();
       if(originalName != null) return originalName;
-      if (nextPosition != null) {
+      if (sharedData.callsiteFallback && nextPosition != null) {
         const nextPositionName = nextPosition.name;
         if(nextPositionName != null) return nextPositionName;
       }
@@ -916,6 +920,10 @@ exports.install = function(options) {
     if (installHandler && hasGlobalProcessEventEmitter()) {
       shimEmitUncaughtException();
     }
+  }
+
+  if (typeof options.callsiteFallback === 'boolean') {
+    sharedData.callsiteFallback = options.callsiteFallback;
   }
 };
 

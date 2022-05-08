@@ -50,6 +50,13 @@ export interface Options {
      * @param options options object internally passed to node's `_resolveFilename` hook
      */
     onConflictingLibraryRedirect?: (request: string, parent: any, isMain: boolean, options: any, redirectedRequest: string) => void;
+
+    /**
+     * If enabled, will fallback to getting mapped function name from callsite (from the following stack frame) when neither
+     * enclosing position nor runtime have a function name.
+     * Default: true
+     */
+    callsiteFallback?: boolean;
 }
 
 export interface Position {
