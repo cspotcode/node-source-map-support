@@ -597,18 +597,34 @@ it('finds the last sourceMappingURL', async function() {
 
 it('maps original name from source', async function() {
   var sourceMap = createEmptySourceMap();
+
+  // Note: related to discussion here: https://github.com/facebook/jest/pull/12786#issuecomment-1116380918
+  // Mapping is at start of the `function` keyword because that is the "enclosing" position of the first stack frame.
+  // This is technically wrong; enclosing names should not use the sourcemap "names"; they should use the new type of
+  // "names" mapping being proposed here: https://github.com/source-map/source-map-rfc/issues/12
+
+  // Position of `function foo`
   sourceMap.addMapping({
-    generated: { line: 2, column: 8 },
-    original: { line: 1000, column: 10 },
-    source: `.original-${id}.js`,
-  });
-  sourceMap.addMapping({
-    generated: { line: 4, column: 0 },
+    generated: { line: 2, column: 0 },
     original: { line: 1002, column: 1 },
     source: `.original-${id}.js`,
     name: "myOriginalName"
   });
+  // Position of `new Error`
+  sourceMap.addMapping({
+    generated: { line: 3, column: 8 },
+    original: { line: 1000, column: 10 },
+    source: `.original-${id}.js`,
+  });
+  // Position of `foo();`
+  sourceMap.addMapping({
+    generated: { line: 5, column: 0 },
+    original: { line: 1003, column: 1 },
+    source: `.original-${id}.js`,
+    name: "myOriginalCallsiteName"
+  });
   await compareStackTrace(sourceMap, [
+    '',
     'function foo() {',
     '  throw new Error("test");',
     '}',
@@ -616,7 +632,7 @@ it('maps original name from source', async function() {
   ], [
     'Error: test',
     re`^    at myOriginalName \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}.js:1000:11\)$`,
-    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}.js:1002:2\)$`
+    re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}.js:1003:2\)$`
   ]);
 });
 
