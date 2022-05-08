@@ -594,13 +594,17 @@ function wrapCallSite(frame, state) {
       column: column
     });
 
-    var enclosingLine = frame.getEnclosingLineNumber();
-    var enclosingColumn = frame.getEnclosingColumnNumber() - 1;
-    var enclosingPosition = mapSourcePosition({
-      source: source,
-      line: enclosingLine,
-      column: enclosingColumn
-    });
+    let enclosingPosition = null;
+    // Was added in node 14.17
+    if(frame.getEnclosingLineNumber) {
+      var enclosingLine = frame.getEnclosingLineNumber();
+      var enclosingColumn = frame.getEnclosingColumnNumber() - 1;
+      enclosingPosition = mapSourcePosition({
+        source: source,
+        line: enclosingLine,
+        column: enclosingColumn
+      });
+    }
 
     state.curPosition = position;
     const nextPosition = state.nextPosition;
