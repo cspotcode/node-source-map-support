@@ -598,29 +598,15 @@ function wrapCallSite(frame, state) {
       column: column
     });
 
-    let enclosingName = null;
-    // Was added in node 14.17
-    if(frame.getEnclosingLineNumber) {
-      const enclosingLine = frame.getEnclosingLineNumber();
-      const enclosingColumn = frame.getEnclosingColumnNumber() - 1;
-      const enclosingPosition = mapSourcePosition({
-        source: source,
-        line: enclosingLine,
-        column: enclosingColumn
-      });
-      if(enclosingPosition) enclosingName = enclosingPosition.name;
-    }
-
     state.curPosition = position;
     const nextPosition = state.nextPosition;
 
     frame = cloneCallSite(frame);
 
     // Check for function name in this order:
-    // enclosing position, then runtime function name, finally fallback to callsite (subsequent stack frame's position)
+    // runtime function name, then fallback to callsite (subsequent stack frame's position)
     var originalFunctionName = frame.getFunctionName;
     frame.getFunctionName = function() {
-      if(enclosingName != null) return enclosingName;
       const originalName = originalFunctionName();
       if(originalName != null) return originalName;
       if (sharedData.callsiteFallback && nextPosition != null) {
