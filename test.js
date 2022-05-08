@@ -623,6 +623,7 @@ it('maps original name from source', async function() {
     source: `.original-${id}.js`,
     name: "myOriginalCallsiteName"
   });
+  const expectedFunctionName = semver.gte(process.version, '14.17.0') ? 'myOriginalName' : 'foo';
   await compareStackTrace(sourceMap, [
     '',
     'function foo() {',
@@ -631,7 +632,7 @@ it('maps original name from source', async function() {
     'foo();'
   ], [
     'Error: test',
-    re`^    at myOriginalName \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}.js:1000:11\)$`,
+    re`^    at ${expectedFunctionName} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}.js:1000:11\)$`,
     re`^    at ${stackFrameAtTest()} \(${stackFramePathStartsWith()}(?:.*[/\\])?\.original-${id}.js:1003:2\)$`
   ]);
 });
