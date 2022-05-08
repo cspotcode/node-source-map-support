@@ -598,20 +598,21 @@ it('finds the last sourceMappingURL', async function() {
 it('maps original name from source', async function() {
   var sourceMap = createEmptySourceMap();
   sourceMap.addMapping({
-    generated: { line: 2, column: 8 },
+    generated: { line: 3, column: 8 },
     original: { line: 1000, column: 10 },
     source: `.original-${id}.js`,
   });
   sourceMap.addMapping({
-    generated: { line: 4, column: 0 },
+    generated: { line: 5, column: 0 },
     original: { line: 1002, column: 1 },
     source: `.original-${id}.js`,
     name: "myOriginalName"
   });
   await compareStackTrace(sourceMap, [
-    'function foo() {',
+    'function identity(v) { return v }',
+    'const foo = identity(function () {',
     '  throw new Error("test");',
-    '}',
+    '})',
     'foo();'
   ], [
     'Error: test',
