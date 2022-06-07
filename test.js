@@ -194,21 +194,27 @@ async function compareStackTrace(sourceMap, source, expected) {
   fs.writeFileSync(`.generated-${id}-separate.${extension}.map`, sourceMap.toString());
   fs.writeFileSync(`.generated-${id}-separate.${extension}`, `${header}${namedExportDeclaration()} = function() {` +
     source.join('\n') + `};//@ sourceMappingURL=.generated-${id}-separate.${extension}.map`);
+  let caught = false;
   try {
     await (await import(`./.generated-${id}-separate.${extension}`)).test();
   } catch (e) {
+    caught = true;
     compareLines(e.stack.split(/\r\n|\n/), rewriteExpectation(expected, `.generated-${id}`, `.generated-${id}-separate`));
   }
+  if(!caught) throw new Error('expected to catch an error but none was thrown.');
 
   // Check again with an inline source map (in a data URL)
   fs.writeFileSync(`.generated-${id}-inline.${extension}`, `${header}${namedExportDeclaration()} = function() {` +
     source.join('\n') + '};//@ sourceMappingURL=data:application/json;base64,' +
     bufferFrom(sourceMap.toString()).toString('base64'));
+  caught = false;
   try {
     await (await import (`./.generated-${id}-inline.${extension}`)).test();
   } catch (e) {
+    caught = true;
     compareLines(e.stack.split(/\r\n|\n/), rewriteExpectation(expected, `.generated-${id}`, `.generated-${id}-inline`));
   }
+  if(!caught) throw new Error('expected to catch an error but none was thrown.');
 }
 
 function compareStdout(done, sourceMap, source, expected) {
@@ -460,29 +466,50 @@ it('function constructor', async function() {
   ]);
 });
 
-it('Verify node does not support Promise.allSettled stack frames. When this test starts breaking, we need to start testing for Promise.allSettled.', async () => {
-  // results1/driver1 is not strictly necessary to test allSettled; it is here to remind myself how to correctly get Promise.* methods to appear in a stack trace.
-  let result1;
-  await driver1().catch(e => result1 = e);
-  assert.match(result1.stack, /\bPromise\.all\b/);
+if(semver.gte(process.version, '18.0.0')) {
 
-  // Copied from V8 tests: https://github.com/v8/v8/commit/89ed081c176e286f9d65f3821d43f568cd56a035#diff-1a0a032688d7546dcfe5730eaab2854fb1b8dab656d8bb940dffc71b7b975aae
-  async function fine() { }
-  async function thrower() {
-    await fine();
-    throw new Error();
-  }
-  async function driver1() {
-    return await Promise.all([fine(), fine(), thrower(), thrower()]);
-  }
-  async function driver2() {
-    return await Promise.allSettled([fine(), fine(), thrower(), thrower()]);
-  }
+  it('async stack frames: async, Promise.allSettled', async function() {
+    await compareStackTrace(createMultiLineSourceMap(), [
+      'async function foo() { throw (await bar())[0].reason; }',
+      'async function bar() { return await Promise.allSettled([baz()]) }',
+      'async function baz() { await null; throw new Error("test"); }',
+      'return foo();'
+    ], [
+      'Error: test',
+      re`^    at baz \(${stackFramePathStartsWith()}(?:.*[/\\])?line3.js:1003:103\)$`,
+      re`^    at async Promise\.allSettled \(index 0\)$`,
+      re`^    at async bar \(${stackFramePathStartsWith()}(?:.*[/\\])?line2.js:1002:102\)$`,
+      re`^    at async foo \(${stackFramePathStartsWith()}(?:.*[/\\])?line1.js:1001:101\)$`
+    ]);
+  });
 
-  const results2 = await driver2();
-  assert.equal(results2[2].status, 'rejected');
-  assert.doesNotMatch(results2[2].reason.stack, /\bPromise\.allSettled\b/);
-});
+} else {
+
+  it('Verify node does not support Promise.allSettled stack frames. When this test starts breaking, we need to start testing for Promise.allSettled.', async () => {
+    // results1/driver1 is not strictly necessary to test allSettled; it is here to remind myself how to correctly get Promise.* methods to appear in a stack trace.
+    let result1;
+    await driver1().catch(e => result1 = e);
+    assert.match(result1.stack, /\bPromise\.all\b/);
+
+    // Copied from V8 tests: https://github.com/v8/v8/commit/89ed081c176e286f9d65f3821d43f568cd56a035#diff-1a0a032688d7546dcfe5730eaab2854fb1b8dab656d8bb940dffc71b7b975aae
+    async function fine() { }
+    async function thrower() {
+      await fine();
+      throw new Error();
+    }
+    async function driver1() {
+      return await Promise.all([fine(), fine(), thrower(), thrower()]);
+    }
+    async function driver2() {
+      return await Promise.allSettled([fine(), fine(), thrower(), thrower()]);
+    }
+
+    const results2 = await driver2();
+    assert.equal(results2[2].status, 'rejected');
+    assert.doesNotMatch(results2[2].reason.stack, /\bPromise\.allSettled\b/);
+  });
+
+}
 
 it('async stack frames: async, Promise.all'/*Promise.allSettled*/, async function() {
   await compareStackTrace(createMultiLineSourceMap(), [
