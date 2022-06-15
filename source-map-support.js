@@ -46,18 +46,26 @@ function initializeSharedData(defaults) {
   if (typeof Symbol !== 'undefined') {
     sharedDataKey = Symbol.for(sharedDataKey);
   }
-  var sharedData = this[sharedDataKey];
-  if (!sharedData) {
-    sharedData = { version: sharedDataVersion };
-    if (Object.defineProperty) {
-      Object.defineProperty(this, sharedDataKey, { value: sharedData });
+
+  var sharedData = { version: sharedDataVersion }
+
+  if (this !== undefined) {
+    var data = this[sharedDataKey];
+    if (!data) {
+      if (Object.defineProperty) {
+        Object.defineProperty(this, sharedDataKey, { value: sharedData });
+      } else {
+        this[sharedDataKey] = sharedData;
+      }
     } else {
-      this[sharedDataKey] = sharedData;
+      sharedData = data;
+    }
+    
+    if (sharedDataVersion !== sharedData.version) {
+      throw new Error("Multiple incompatible instances of source-map-support were loaded");
     }
   }
-  if (sharedDataVersion !== sharedData.version) {
-    throw new Error("Multiple incompatible instances of source-map-support were loaded");
-  }
+  
   for (var key in defaults) {
     if (!(key in sharedData)) {
       sharedData[key] = defaults[key];
