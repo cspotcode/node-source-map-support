@@ -128,6 +128,8 @@ function hasGlobalProcessEventEmitter() {
   return ((typeof process === 'object') && (process !== null) && (typeof process.on === 'function'));
 }
 
+const proc = hasGlobalProcessEventEmitter() ? process : undefined
+
 function tryFileURLToPath(v) {
   if(isFileUrl(v)) {
     return fileURLToPath(v);
@@ -584,7 +586,7 @@ function wrapCallSite(frame, state) {
     // v11 is not an LTS candidate, we can just test the one version with it.
     // Test node versions for: 10.16-19, 10.20+, 12-19, 20-99, 100+, or 11.11
     var noHeader = /^v(10\.1[6-9]|10\.[2-9][0-9]|10\.[0-9]{3,}|1[2-9]\d*|[2-9]\d|\d{3,}|11\.11)/;
-    var headerLength = noHeader.test(process.version) ? 0 : 62;
+    var headerLength = noHeader.test(proc.version) ? 0 : 62;
     if (line === 1 && column > headerLength && !isInBrowser() && !frame.isEval()) {
       column -= headerLength;
     }
@@ -714,8 +716,8 @@ function printFatalErrorUponExit (error) {
   var source = getErrorSource(error);
 
   // Ensure error is printed synchronously and not truncated
-  if (process.stderr._handle && process.stderr._handle.setBlocking) {
-    process.stderr._handle.setBlocking(true);
+  if (proc.stderr._handle && proc.stderr._handle.setBlocking) {
+    proc.stderr._handle.setBlocking(true);
   }
 
   if (source) {
@@ -726,13 +728,13 @@ function printFatalErrorUponExit (error) {
   console.error(
     util.inspect(error, {
       customInspect: false,
-      colors: process.stderr.isTTY
+      colors: proc.stderr.isTTY
     })
   );
 }
 
 function shimEmitUncaughtException () {
-  const originalValue = process.emit;
+  const originalValue = proc.emit;
   var hook = sharedData.processEmitHook = {
     enabled: true,
     originalValue,
@@ -741,13 +743,13 @@ function shimEmitUncaughtException () {
   var isTerminatingDueToFatalException = false;
   var fatalException;
 
-  process.emit = sharedData.processEmitHook.installedValue = function (type) {
+  proc.emit = sharedData.processEmitHook.installedValue = function (type) {
     const hadListeners = originalValue.apply(this, arguments);
     if(hook.enabled) {
       if (type === 'uncaughtException' && !hadListeners) {
         isTerminatingDueToFatalException = true;
         fatalException = arguments[1];
-        process.exit(1);
+        proc.exit(1);
       }
       if (type === 'exit' && isTerminatingDueToFatalException) {
         printFatalErrorUponExit(fatalException);
@@ -902,8 +904,8 @@ exports.uninstall = function() {
     // Disable behavior
     sharedData.processEmitHook.enabled = false;
     // If possible, remove our hook function.  May not be possible if subsequent third-party hooks have wrapped around us.
-    if(process.emit === sharedData.processEmitHook.installedValue) {
-      process.emit = sharedData.processEmitHook.originalValue;
+    if(proc.emit === sharedData.processEmitHook.installedValue) {
+      proc.emit = sharedData.processEmitHook.originalValue;
     }
     sharedData.processEmitHook = undefined;
   }
